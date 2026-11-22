@@ -65,7 +65,7 @@ folders in the Xcode folder above.
 ```ts
 // praecise.config.ts
 import { defineConfig } from "@praecise/harness";
-import { apple } from "@praecise/environments/apple";
+import { apple } from "@praecise/harness-environments/apple";
 
 export default defineConfig({
   plugins: [

@@ -1,4 +1,4 @@
-# praecise-environments
+# praecise-harness-environments
 
 Environments for [praecise-harness](https://github.com/Praecise/praecise-harness).
 
@@ -14,15 +14,15 @@ takes one with a line in its config.
 ## Use one
 
 ```
-git clone https://github.com/Praecise/praecise-environments
+git clone https://github.com/Praecise/praecise-harness-environments
 ```
 
-In a harness app, add the clone as a dependency (`npm install ../praecise-environments`)
+In a harness app, add the clone as a dependency (`npm install ../praecise-harness-environments`)
 and list the environment:
 
 ```ts
 import { defineConfig } from "@praecise/harness";
-import { apple } from "@praecise/environments/apple";
+import { apple } from "@praecise/harness-environments/apple";
 
 export default defineConfig({ plugins: [apple({ /* your team's values */ })] });
 ```

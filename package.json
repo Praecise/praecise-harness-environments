@@ -1,5 +1,5 @@
 {
-  "name": "@praecise/environments",
+  "name": "@praecise/harness-environments",
   "version": "0.1.0",
   "description": "Environments for praecise-harness: a platform's skills, tools, agent and checks in one plugin",
   "license": "Apache-2.0",

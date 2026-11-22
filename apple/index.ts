@@ -1,6 +1,6 @@
 // Apple development environment for Claude by Praecise, as a praecise-harness plugin.
 //
-//   import { apple } from "@praecise/environments/apple";
+//   import { apple } from "@praecise/harness-environments/apple";
 //   export default defineConfig({ plugins: [apple({ team: "ABCDE12345", teamName: "Example Ltd", ... })] });
 //
 // The skills are the files in ./skills, the same ones install.sh gives to Claude Code
