@@ -1,0 +1,6 @@
+{
+  "name": "apple-dev",
+  "description": "Apple development environment for Claude by Praecise: project setup, build and test through Xcode, signing, and release for the {{TEAM_NAME}} team.",
+  "version": "0.1.0",
+  "author": { "name": "{{TEAM_NAME}}" }
+}

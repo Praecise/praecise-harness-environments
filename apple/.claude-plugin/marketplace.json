@@ -1,0 +1,11 @@
+{
+  "name": "praecise",
+  "owner": { "name": "{{TEAM_NAME}}" },
+  "plugins": [
+    {
+      "name": "apple-dev",
+      "source": "./",
+      "description": "Apple development environment for Claude by Praecise"
+    }
+  ]
+}

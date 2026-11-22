@@ -1,0 +1,8 @@
+node_modules/
+apple.env
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.provisionprofile
+.DS_Store

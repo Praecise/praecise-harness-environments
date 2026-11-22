@@ -1,0 +1,14 @@
+{
+  "name": "@praecise/environments",
+  "version": "0.1.0",
+  "description": "Environments for praecise-harness: a platform's skills, tools, agent and checks in one plugin",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./apple": "./apple/index.ts"
+  },
+  "files": ["apple", "README.md", "LICENSE"],
+  "peerDependencies": {
+    "@praecise/harness": ">=1.1.0"
+  }
+}
