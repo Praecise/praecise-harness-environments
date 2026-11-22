@@ -27,8 +27,8 @@ import { apple } from "@praecise/environments/apple";
 export default defineConfig({ plugins: [apple({ /* your team's values */ })] });
 ```
 
-Needs a `@praecise/harness` in which a plugin can bring skills (`skillsIn`): the
-`main` branch today, and the first release after 1.0.0. Needs Node 24, which runs
+Needs `@praecise/harness` 1.1.0 or later, the first version in which a plugin can
+bring skills (`skillsIn`). Needs Node 24, which runs
 the TypeScript here as it is. Install from a clone, as above: Node does not run
 TypeScript that has been copied into `node_modules`, and a linked folder is not a
 copy.
