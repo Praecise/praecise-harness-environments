@@ -1,0 +1,11 @@
+{
+  "name": "praecise-harness-environments",
+  "owner": { "name": "Praecise" },
+  "plugins": [
+    {
+      "name": "meta-marketing",
+      "source": "./meta-marketing",
+      "description": "Meta Platforms marketing environment for Claude by Praecise"
+    }
+  ]
+}

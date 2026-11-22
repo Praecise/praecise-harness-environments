@@ -1,13 +1,14 @@
 {
   "name": "@praecise/harness-environments",
   "version": "0.1.0",
-  "description": "Environments for praecise-harness: a platform's skills, tools, agent and checks in one plugin",
+  "description": "Environments for praecise-harness: one platform and one kind of work each, as a plugin for Claude and an environment for the harness",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    "./apple": "./apple/index.ts"
+    "./apple": "./apple/index.ts",
+    "./meta-marketing": "./meta-marketing/index.ts"
   },
-  "files": ["apple", "README.md", "LICENSE"],
+  "files": ["apple", "meta-marketing", "README.md", "LICENSE"],
   "peerDependencies": {
     "@praecise/harness": ">=1.1.0"
   }

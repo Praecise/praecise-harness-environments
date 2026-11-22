@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "meta-ads": { "type": "http", "url": "https://mcp.facebook.com/ads" },
+    "meta-whatsapp": { "type": "http", "url": "https://mcp.facebook.com/whatsapp_business_tools" },
+    "meta-developer": { "type": "http", "url": "https://mcp.facebook.com/devtools" }
+  }
+}
