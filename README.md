@@ -41,10 +41,8 @@ export default defineConfig({ plugins: [appleDevelopment({ /* your team's values
 ```
 
 Both environments need `@praecise/harness` 1.2.1 or later, the first with
-`environment()`. Where npm has an earlier version, 1.2.1 has not been published there
-yet: clone the harness at the tag `v1.2.1`, run `npm install` and `npm run build` in
-it, and install that folder in the app. Both need Node 24, which runs the TypeScript
-here as it is. Install this package from a clone, as above: Node does not run TypeScript that has been copied into
+`environment()`, and Node 24, which runs the TypeScript here as it is. Install this
+package from a clone, as above: Node does not run TypeScript that has been copied into
 `node_modules`, and a linked folder is not a copy.
 
 In Claude Code, the Meta Platforms marketing environment installs from this repository
