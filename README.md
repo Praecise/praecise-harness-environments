@@ -18,8 +18,8 @@ Each environment is two things from one folder:
 
 | Environment | For | Status |
 |---|---|---|
-| [Apple development](apple/) | Building, testing, signing and releasing apps for iOS, iPadOS, macOS, tvOS, watchOS and visionOS, with Xcode | 0.1.0 |
-| [Meta Platforms marketing](meta-marketing/) | Advertising on Facebook and Instagram and WhatsApp Business messaging, through Meta's own MCP servers | 0.1.0, reading; changes after a live sign-in confirms them |
+| [Apple development](apple-development/) | Building, testing, signing and releasing apps for iOS, iPadOS, macOS, tvOS, watchOS and visionOS, with Xcode | 0.2.0 |
+| [Meta Platforms marketing](meta-marketing/) | Advertising on Facebook and Instagram, Page and Instagram publishing and comments, and WhatsApp Business messaging, through Meta's own MCP servers and the Graph API | 0.2.0 |
 
 ## Use one
 
@@ -32,21 +32,20 @@ and list the environment:
 
 ```ts
 import { defineConfig } from "@praecise/harness";
-import { apple } from "@praecise/harness-environments/apple";
+import { appleDevelopment } from "@praecise/harness-environments/apple-development";
 
-export default defineConfig({ plugins: [apple({ /* your team's values */ })] });
+export default defineConfig({ plugins: [appleDevelopment({ /* your team's values */ })] });
 ```
 
-The Apple development environment needs `@praecise/harness` 1.1.0 or later. The Meta
-Platforms marketing environment needs the release after it, the first with
-`environment()`. Both need Node 24, which runs the TypeScript here as it is. Install
+Both environments need `@praecise/harness` 1.2.0 or later, the first with
+`environment()`, and Node 24, which runs the TypeScript here as it is. Install
 from a clone, as above: Node does not run TypeScript that has been copied into
 `node_modules`, and a linked folder is not a copy.
 
 In Claude Code, the Meta Platforms marketing environment installs from this repository
 as a marketplace (`/plugin marketplace add Praecise/praecise-harness-environments`, then
 `/plugin install meta-marketing`). The Apple development environment installs with
-`apple/install.sh`, which fills in your team's values and also sets it up for Claude
+`apple-development/install.sh`, which fills in your team's values and also sets it up for Claude
 Agent in Xcode.
 
 ## Write one

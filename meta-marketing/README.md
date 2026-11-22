@@ -1,7 +1,8 @@
 # Meta Platforms marketing environment for Claude by Praecise
 
 Lets Claude run marketing on Meta Platforms for the accounts you connect:
-advertising on Facebook and Instagram, and WhatsApp Business messaging. It works in a
+advertising on Facebook and Instagram, a Page's and an Instagram account's posts and
+comments, and WhatsApp Business messaging. It works in a
 praecise-harness app, where one sign-in covers every account and each account has its
 own limits, and in Claude Code as a plugin.
 
@@ -21,7 +22,7 @@ index.ts               the praecise-harness environment
 .claude-plugin/        the Claude Code plugin
 ```
 
-The test is `tests/meta-marketing.test.ts` at the top of the repository.
+The tests are `tests/meta-marketing.test.ts` at the top of the repository.
 
 Four skills, on purpose: every installed skill adds its description to every session.
 
@@ -36,9 +37,9 @@ Meta runs its own MCP servers, and the environment uses them as they are.
 | Meta Social Technologies | `https://mcp.facebook.com/devtools` | Apps, App Review, compliance, webhooks, docs search |
 | Instagram | `https://mcp.facebook.com/instagram` | Publishing. Live, not yet documented by Meta |
 
-Accounts are found through the Graph API. Page posts and comments, Messenger, and
-Instagram comments, messages and insights are not offered by any of Meta's servers yet
-and are not in this version.
+Accounts are found through the Graph API. A Page's posts and comments and an Instagram
+account's media and comments are not offered by any of Meta's servers, so the
+environment works on them through the Graph API when `organic` is set.
 
 ## In a praecise-harness app
 
@@ -48,6 +49,7 @@ import { metaMarketing } from "@praecise/harness-environments/meta-marketing";
 
 export default defineConfig({
   plugins: [metaMarketing({ appId: "your Meta app's App ID", profile: "read" })],
+  // also: organic: true, rules: true, separate: ["whatsapp"]
 });
 ```
 
@@ -92,14 +94,49 @@ praecise meta-marketing limits acme/eu-store perDay=500 approveAbove=50
 
 Agents use three functions: `meta_marketing_accounts` lists the accounts by name,
 `meta_marketing_tools` lists what one of Meta's servers offers and what each tool
-does, and `meta_marketing_call` calls one. Reading works on any account. Creating
-needs the account in draft mode. Activating, updating, boosting, sending and anything
-else that goes live needs act mode and a person's approval, and deleting always does.
+does, and `meta_marketing_call` calls one. An account is named wherever a tool asks
+for one, by the name in the list; the environment sends Meta the id, and gives back
+names for the ids in the answer. Reading works on any account. Creating needs the
+account in draft mode. Activating, updating, boosting, sending and anything else that
+goes live needs act mode and a person's approval, and deleting always does. A change
+that names no account is refused.
 
-For messages and other deliveries from Meta, mount `environment.receive` on the app's
-server and set `META_APP_SECRET` and `META_WEBHOOK_VERIFY_TOKEN`. Deliveries are
-checked against Meta's signature and published as events named
-`meta-marketing.<object>.<field>`.
+With `organic: true` there are eight more, on the Graph API as the Page itself:
+
+| Function | Does |
+|---|---|
+| `meta_page_posts`, `meta_page_comments` | Read a Page's posts, and the comments on one |
+| `meta_page_post` | Publish a post now, or at a time up to 30 days ahead |
+| `meta_page_comment` | Comment on a post as the Page |
+| `meta_instagram_media`, `meta_instagram_comments` | Read an Instagram account's posts, and the comments on one |
+| `meta_instagram_publish` | Publish one JPEG image |
+| `meta_instagram_reply` | Reply to a comment |
+
+Publishing and replying need the Page or the Instagram account in act mode and a
+person's approval. The Meta app needs the Page and Instagram permissions these ask
+for (`pages_read_engagement`, `pages_manage_posts`, `pages_manage_engagement`,
+`instagram_manage_comments`, `instagram_content_publish`).
+
+With `rules: true` an ad account's mode and limits are also written to Meta as its own
+rules for agents, so Meta refuses what the account forbids whichever client asks: read
+mode denies everything, draft mode denies switching delivery on or off, and `perAction`
+and `perDay` become the largest budget increase and the daily budget ceiling. Meta
+offers these rules to enrolled businesses only; for one that is not, changing a mode
+says so.
+
+Meta documents that its Ads server takes a token from your own app. If one of its
+other servers does not, list it in `separate` (`"instagram"`, `"whatsapp"`,
+`"developer"`): `connect` then signs in to it by itself straight after the first, in
+the same browser.
+
+The workflow `meta-weekly-report` reports on one ad account for the last seven days
+against the seven before.
+
+For comments, messages and other deliveries from Meta, point the Meta app's webhook at
+`/environments/meta-marketing/intake` on the app's server and set `META_APP_SECRET`
+and `META_WEBHOOK_VERIFY_TOKEN`. Deliveries are checked against Meta's signature and
+published as events named `meta-marketing.<object>.<field>`, with the account's name
+as the subject.
 
 ## In Claude Code
 
@@ -113,18 +150,25 @@ time it is used, with no Meta app. The skills are the same. The accounts list, m
 limits and approvals above belong to the harness and are not in this path: here Claude
 asks before it changes anything, and Meta creates campaigns, ad sets and ads paused.
 
-## What is not done yet
+## What has not been tried against Meta itself
 
-- Changing things through Meta's servers from a harness app. The environment refuses
-  any change that does not name an account, and the names of the arguments Meta's
-  tools take for an account are confirmed against a live sign-in before they are
-  mapped. Reading works now.
-- Whether Meta accepts a token from your own app on the WhatsApp, Instagram and Social
-  Technologies servers, as it documents for the Ads server. Where it does not, those
-  servers are for Claude Code until it does.
-- Holding an account to its limits on Meta's side. Meta has rules for this in limited
-  availability; a business must be enrolled.
-- Threads. Meta's server answers but nothing is published about it.
+Everything here is built from what Meta publishes and from what its servers answer
+without a sign-in, and is tested against a stand-in for Meta. Three things only a real
+sign-in shows:
+
+- Whether Meta takes the one token on its WhatsApp, Instagram and Social Technologies
+  servers. `separate` is there for the ones that do not.
+- The tools of the Instagram server, which Meta has not documented. Until they are
+  listed in the environment, each is treated as publishing and needs a person.
+- Whether your business is enrolled for Meta's rules for agents.
+
+Not in this version: Messenger and Instagram direct messages, Instagram video and
+carousels, hiding or deleting comments, and Threads, whose server answers but about
+which Meta has published nothing.
+
+The guard holds a call to the accounts it names. A campaign, ad set or ad inside an
+account is named to Meta by Meta's own id, and it is Meta that checks which account it
+belongs to; `rules: true` is what makes Meta hold that account to its limits.
 
 ## Rules it keeps
 

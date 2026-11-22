@@ -65,11 +65,11 @@ folders in the Xcode folder above.
 ```ts
 // praecise.config.ts
 import { defineConfig } from "@praecise/harness";
-import { apple } from "@praecise/harness-environments/apple";
+import { appleDevelopment } from "@praecise/harness-environments/apple-development";
 
 export default defineConfig({
   plugins: [
-    apple({
+    appleDevelopment({
       team: "ABCDE12345",
       teamName: "Example Ltd",
       bundlePrefix: "com.example",
@@ -81,10 +81,14 @@ export default defineConfig({
 ```
 
 The app gains the five skills, the tool `xcode` (Xcode's MCP bridge), the agent
-`apple`, and a check of the machine:
+`apple`, and a check of the machine. There is nothing to sign in to: the team's
+signing identities live in this Mac's keychain and never leave it, and `connect`
+finds them.
 
 ```
-praecise apple doctor
+praecise apple-development connect     # find the team's identities on this Mac
+praecise apple-development accounts    # the team and each identity found
+praecise apple-development doctor      # what the machine is missing
 praecise run apple "build the app and fix what fails"
 praecise acp --agent apple      # as an agent an editor launches, Xcode included
 ```

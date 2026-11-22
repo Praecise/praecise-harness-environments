@@ -1,16 +1,19 @@
-// Apple development environment for Claude by Praecise, as a praecise-harness plugin.
+// Apple development environment for Claude by Praecise, as a praecise-harness environment.
 //
-//   import { apple } from "@praecise/harness-environments/apple";
-//   export default defineConfig({ plugins: [apple({ team: "ABCDE12345", teamName: "Example Ltd", ... })] });
+//   import { appleDevelopment } from "@praecise/harness-environments/apple-development";
+//   export default defineConfig({ plugins: [appleDevelopment({ team: "ABCDE12345", teamName: "Example Ltd", ... })] });
 //
 // The skills are the files in ./skills, the same ones install.sh gives to Claude Code
 // and to Claude Agent in Xcode. Each holds {{PLACEHOLDERS}} for a team's values, filled
 // in here from the options.
+//
+// There is nothing to sign in to: the team's signing identities live in the keychain of
+// the Mac, and never leave it. `connect` finds them.
 
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { agent, skillsIn, tool, type Plugin } from "@praecise/harness";
+import { agent, environment, skillsIn, tool, type Environment, type EnvironmentCheck, type FoundAccount } from "@praecise/harness";
 
 export interface AppleOptions {
   /** The ten-character Team ID from the developer account's membership details. */
@@ -25,8 +28,6 @@ export interface AppleOptions {
   notaryProfile: string;
 }
 
-type Command = NonNullable<Plugin["commands"]>[string];
-
 const run = (cmd: string, args: string[]): string | undefined => {
   try {
     return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 });
@@ -35,8 +36,8 @@ const run = (cmd: string, args: string[]): string | undefined => {
   }
 };
 
-/** The Apple environment for one developer team. */
-export function apple(options: AppleOptions): Plugin {
+/** The Apple development environment for one developer team. */
+export function appleDevelopment(options: AppleOptions): Environment {
   const here = fileURLToPath(new URL(".", import.meta.url)).replace(/\/$/, "");
   const values: Record<string, string> = {
     TEAM_ID: options.team,
@@ -61,36 +62,42 @@ export function apple(options: AppleOptions): Plugin {
     `Developer ID Application: ${options.teamName} (${options.team})`,
     `Developer ID Installer: ${options.teamName} (${options.team})`,
   ];
+  const inKeychain = (): string => run("security", ["find-identity", "-v"]) ?? "";
 
-  /** Say what this machine is missing for Apple development. Returns 0 when nothing is. */
-  const doctor: Command["run"] = (_argv, ctx) => {
-    let missing = 0;
-    const say = (ok: boolean, what: string, fix?: string): void => {
-      if (!ok) missing += 1;
-      ctx.out(`${ok ? "ok     " : "MISSING"}  ${what}${ok || !fix ? "" : `  ->  ${fix}`}`);
-    };
+  const check = (name: string, ok: () => boolean, fix: string): EnvironmentCheck => ({
+    name,
+    run: async () => (ok() ? { ok: true } : { ok: false, fix }),
+  });
 
-    if (process.platform !== "darwin") {
-      ctx.out("MISSING  macOS: Apple development needs a Mac");
-      return 1;
-    }
-    const xcode = run("xcodebuild", ["-version"]);
-    say(Boolean(xcode), `Xcode${xcode ? ` (${xcode.split("\n")[0]})` : ""}`, "install Xcode 26.3 or later");
-    say(Boolean(run("xcrun", ["--find", "mcpbridge"])), "Xcode MCP bridge (xcrun mcpbridge)", "needs Xcode 26.3 or later");
-    say(Boolean(run("pgrep", ["-x", "Xcode"])), "Xcode is running", "open the project in Xcode and allow external agents in Settings > Intelligence");
-
-    const found = run("security", ["find-identity", "-v"]) ?? "";
-    for (const name of identities) say(found.includes(name), `identity  ${name}`, "see docs/account-setup.md");
-
-    const notary = run("xcrun", ["notarytool", "history", "--keychain-profile", options.notaryProfile]);
-    say(Boolean(notary), `notarization credential (${options.notaryProfile})`, "see docs/account-setup.md");
-
-    ctx.out(missing ? `${missing} missing` : "ready");
-    return missing ? 1 : 0;
-  };
-
-  return {
-    name: "apple",
+  return environment({
+    name: "apple-development",
+    description: "Building, testing, signing and releasing apps for Apple platforms with Xcode.",
+    signIn: {
+      kind: "local",
+      // The team is here when its development identity is in the keychain.
+      find: async () => (inKeychain().includes(options.developmentIdentity) ? { id: options.team, label: options.teamName } : undefined),
+    },
+    // The team, and each of its identities this Mac holds.
+    discover: async () => {
+      const held = inKeychain();
+      const found: FoundAccount[] = [{ kind: "team", id: options.team, name: options.teamName }];
+      for (const name of identities) {
+        if (held.includes(name)) found.push({ kind: "signing_identity", id: name, name: name.split(":")[0]!, parent: `team:${options.team}` });
+      }
+      return found;
+    },
+    checks: [
+      check("macOS", () => process.platform === "darwin", "Apple development needs a Mac"),
+      check("Xcode", () => Boolean(run("xcodebuild", ["-version"])), "install Xcode 26.3 or later"),
+      check("Xcode MCP bridge (xcrun mcpbridge)", () => Boolean(run("xcrun", ["--find", "mcpbridge"])), "needs Xcode 26.3 or later"),
+      check("Xcode is running", () => Boolean(run("pgrep", ["-x", "Xcode"])), "open the project in Xcode and allow external agents in Settings > Intelligence"),
+      ...identities.map((name) => check(`identity  ${name}`, () => inKeychain().includes(name), "see docs/account-setup.md")),
+      check(
+        `notarization credential (${options.notaryProfile})`,
+        () => Boolean(run("xcrun", ["notarytool", "history", "--keychain-profile", options.notaryProfile])),
+        "see docs/account-setup.md",
+      ),
+    ],
     app: {
       skills,
       tools: { xcode: tool({ command: ["xcrun", "mcpbridge"] }) },
@@ -105,14 +112,14 @@ export function apple(options: AppleOptions): Plugin {
             "Confirm with the owner before any upload, notarization or change on the developer portal.",
             "Never write a key, .p12, .p8 or provisioning profile to disk.",
           ].join("\n"),
-          tools: ["xcode"],
+          tools: ["xcode", "apple_development_accounts"],
         }),
       },
     },
-    commands: {
-      doctor: { describe: "Say what this machine is missing for Apple development.", run: doctor },
-    },
-  };
+  });
 }
 
-export default apple;
+/** The name this had before environments were named for a platform and a kind of work. */
+export const apple = appleDevelopment;
+
+export default appleDevelopment;

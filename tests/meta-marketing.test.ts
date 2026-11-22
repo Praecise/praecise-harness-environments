@@ -15,16 +15,25 @@ import { metaMarketing } from "../meta-marketing/index.ts";
 const GRAPH = "https://graph.facebook.com/v26.0/";
 
 /** Meta, as far as this environment asks it anything. */
-const meta = (): { fetch: typeof fetch; asked: string[] } => {
+const meta = (enrolled = true): { fetch: typeof fetch; asked: string[] } => {
   const asked: string[] = [];
   const lists: Record<string, unknown[]> = {
     "me/businesses": [{ id: "b1", name: "Acme" }],
     "me/adaccounts": [{ id: "act_9", name: "EU Store", currency: "EUR", business: { id: "b1" } }],
     "me/accounts": [{ id: "p7", name: "Acme Page", instagram_business_account: { id: "ig3", username: "acme" } }],
+    "b1/owned_whatsapp_business_accounts": [{ id: "w5", name: "Acme WhatsApp" }],
+    "w5/phone_numbers": [{ id: "n8", display_phone_number: "+1 555 0100", verified_name: "Acme Support" }],
   };
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
-    asked.push(`${new Headers(init?.headers).get("authorization") ?? "-"} ${url}`);
+    asked.push(`${new Headers(init?.headers).get("authorization") ?? "-"} ${init?.method ?? "GET"} ${url} ${String(init?.body ?? "").replace(/access_token=[^&]*/, "access_token=x")}`.trim());
+    if (url.startsWith("https://ads-api.facebook.com/")) {
+      return enrolled ? Response.json({ data: [] }) : Response.json({ error: { message: "not available", code: 10 } }, { status: 400 });
+    }
+    if (url === `${GRAPH}p7?fields=access_token`) return Response.json({ access_token: "page-token" });
+    if (url === `${GRAPH}p7/feed` && init?.method === "POST") return Response.json({ id: "p7_1" });
+    if (url === `${GRAPH}ig3/media` && init?.method === "POST") return Response.json({ id: "container-1" });
+    if (url === `${GRAPH}ig3/media_publish`) return Response.json({ id: "media-1" });
     if (url.startsWith("https://graph.facebook.com/v27.0/oauth/access_token")) {
       return Response.json({ access_token: "meta-token", expires_in: 5_184_000 });
     }
@@ -47,10 +56,13 @@ const vault = (): { kind: string; get(id: string): Promise<string | undefined>; 
   return { kind: "memory", get: async (id) => held.get(id), put: async (id, secret) => void held.set(id, secret), delete: async (id) => void held.delete(id) };
 };
 
-const connected = async (): Promise<{ environment: ReturnType<typeof metaMarketing>; asked: string[]; root: string }> => {
+const connected = async (
+  options: Partial<Parameters<typeof metaMarketing>[0]> = {},
+  enrolled = true,
+): Promise<{ environment: ReturnType<typeof metaMarketing>; asked: string[]; root: string }> => {
   const root = await mkdtemp(join(tmpdir(), "meta-marketing-"));
-  const there = meta();
-  const environment = metaMarketing({ appId: "1234567890", callbackPort: 0, vault: vault() });
+  const there = meta(enrolled);
+  const environment = metaMarketing({ appId: "1234567890", callbackPort: 0, vault: vault(), ...options });
   environment.use({ root, fetch: there.fetch, env: { META_APP_SECRET: "app-secret", META_WEBHOOK_VERIFY_TOKEN: "agreed" } });
   let page = "";
   await environment.connect({ open: async (address) => ((page = address), signIn(address)) });
@@ -82,7 +94,7 @@ test("finds businesses, ad accounts, Pages and Instagram accounts, by name, in r
       ["acme-page/acme", "instagram_account", "read"],
     ],
   );
-  assert.ok(asked.some((line) => line.startsWith("Bearer meta-token https://graph.facebook.com/v26.0/me/adaccounts")));
+  assert.ok(asked.some((line) => line.startsWith("Bearer meta-token GET https://graph.facebook.com/v26.0/me/adaccounts")));
   // A reading install was not granted WhatsApp, so it is not asked about.
   assert.ok(!asked.some((line) => line.includes("whatsapp")));
   await rm(root, { recursive: true, force: true });
@@ -132,5 +144,56 @@ test("takes a delivery Meta signed, and no other", async () => {
   assert.equal(await check.text(), "42");
   const stranger = await environment.receive(new Request("https://app.example/in?hub.mode=subscribe&hub.verify_token=guess&hub.challenge=42"), publish);
   assert.equal(stranger.status, 403);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("publishes to a Page and to Instagram as the Page, once the account allows it and a person agrees", async () => {
+  const { environment, asked, root } = await connected({ organic: true, profile: "act" });
+  assert.ok(new URL(asked[0]!).searchParams.get("scope")!.includes("pages_manage_posts"));
+  const post = environment.app!.functions!.meta_page_post!;
+  const args = { page: "acme-page", message: "hello" };
+  await assert.rejects(Promise.resolve().then(() => post.run(args, {})), /read mode/);
+  const numbers = await environment.accounts({ kind: "whatsapp_number" });
+  assert.deepEqual(numbers.map((each) => [each.alias, each.facts]), [["acme/acme-support", { number: "+1 555 0100" }]]);
+
+  await environment.setMode("acme-page", "act");
+  const verdict = await environment.authority!.check({ agent: "app", tool: "meta_page_post", origin: "local", args, action: post.action!(args) });
+  assert.ok("stepUp" in verdict);
+  assert.deepEqual(await post.run(args, {}), { id: "p7_1" });
+  assert.ok(asked.some((line) => line.startsWith("Bearer page-token POST https://graph.facebook.com/v26.0/p7/feed message=hello")));
+
+  await environment.setMode("acme-page/acme", "act");
+  const published = await environment.app!.functions!.meta_instagram_publish!.run({ account: "acme-page/acme", image: "https://cdn.example/a.jpg" }, {});
+  assert.deepEqual(published, { id: "media-1" });
+  assert.ok(asked.some((line) => line.includes("ig3/media_publish creation_id=container-1")));
+  await assert.rejects(Promise.resolve().then(() => environment.app!.functions!.meta_page_comments!.run({ page: "acme-page", post: "../me" }, {})), /is not a post/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("holds an ad account to its mode and limits with Meta's own rules, where the business is enrolled", async () => {
+  const { environment, asked, root } = await connected({ rules: true });
+  await environment.setMode("acme/eu-store", "draft");
+  const rules = asked.filter((line) => line.includes("ads-api.facebook.com/v25.0/marketing-api/businesses/b1/accounts/act_9/ads_mcp_rules"));
+  assert.equal(rules.length, 4);
+  assert.ok(rules[0]!.includes("action=all&trigger_type=always&status=paused"));
+  assert.ok(rules[1]!.includes("action=edit_status&trigger_type=always&status=active"));
+
+  await environment.setLimits("acme/eu-store", { perDay: 500 });
+  const ceiling = asked.filter((line) => line.includes("trigger_type=absolute_max")).at(-1)!;
+  assert.ok(ceiling.includes("status=active"));
+  assert.ok(decodeURIComponent(ceiling).includes('"max_value_cents":50000'));
+  await rm(root, { recursive: true, force: true });
+
+  const outside = await connected({ rules: true }, false);
+  await assert.rejects(outside.environment.setMode("acme/eu-store", "draft"), /has to be enrolled/);
+  await rm(outside.root, { recursive: true, force: true });
+});
+
+test("signs in to one of Meta's servers by itself when asked to", async () => {
+  const { environment, asked, root } = await connected({ separate: ["whatsapp"] });
+  const whatsapp = environment.spec.resources!.whatsapp!;
+  assert.equal(whatsapp.separate, true);
+  assert.deepEqual(whatsapp.scopes, ["business_management", "whatsapp_business_management", "whatsapp_business_messaging"]);
+  assert.equal(asked.filter((line) => line.includes("/oauth/access_token")).length, 2);
   await rm(root, { recursive: true, force: true });
 });
