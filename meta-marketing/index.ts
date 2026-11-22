@@ -129,7 +129,8 @@ const WHATSAPP: Record<string, ActionClass> = {
   whatsapp_biz_phone_numbers: "read",
   whatsapp_biz_list_templates: "read",
   whatsapp_biz_get_template: "read",
-  whatsapp_biz_system_user_token: "read",
+  // It leads to where a credential is made, so it is not a read.
+  whatsapp_biz_system_user_token: "publish",
   whatsapp_biz_create_template: "draft",
   whatsapp_biz_update_template: "draft",
   whatsapp_biz_delete_template: "destroy",
