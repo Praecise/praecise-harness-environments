@@ -16,10 +16,13 @@ Each environment is two things from one folder:
 - An environment for praecise-harness, which an app takes with a line in its config
   and then serves to Claude or any other client through one endpoint.
 
-| Environment | For | Status |
-|---|---|---|
-| [Apple development](apple-development/) | Building, testing, signing and releasing apps for iOS, iPadOS, macOS, tvOS, watchOS and visionOS, with Xcode | 0.2.0 |
-| [Meta Platforms marketing](meta-marketing/) | Advertising on Facebook and Instagram, Page and Instagram publishing, comments and conversations, Threads, and WhatsApp Business messaging, through Meta's own MCP servers and its APIs | 0.3.0 |
+| Environment | For |
+|---|---|
+| [Apple development](apple-development/) | Building, testing, signing and releasing apps for iOS, iPadOS, macOS, tvOS, watchOS and visionOS, with Xcode |
+| [Meta Platforms marketing](meta-marketing/) | Advertising on Facebook and Instagram, Page and Instagram publishing, comments and conversations, Threads, and WhatsApp Business messaging, through Meta's own MCP servers and its APIs |
+
+This package is at 0.3.0. Both environments are in it, and neither has a version of
+its own.
 
 ## Use one
 
@@ -38,7 +41,8 @@ export default defineConfig({ plugins: [appleDevelopment({ /* your team's values
 ```
 
 Both environments need `@praecise/harness` 1.2.1 or later, the first with
-`environment()`, and Node 24, which runs the TypeScript here as it is. Install
+`environment()`. Where npm has an earlier version, install the harness from its
+repository at the tag `v1.2.1`. Both need Node 24, which runs the TypeScript here as it is. Install
 from a clone, as above: Node does not run TypeScript that has been copied into
 `node_modules`, and a linked folder is not a copy.
 
