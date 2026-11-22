@@ -27,8 +27,11 @@ import { apple } from "@praecise/environments/apple";
 export default defineConfig({ plugins: [apple({ /* your team's values */ })] });
 ```
 
-Needs `@praecise/harness` 1.1.0 or later, the first version in which a plugin can
-bring skills, and Node 24, which runs the TypeScript here as it is.
+Needs a `@praecise/harness` in which a plugin can bring skills (`skillsIn`): the
+`main` branch today, and the first release after 1.0.0. Needs Node 24, which runs
+the TypeScript here as it is. Install from a clone, as above: Node does not run
+TypeScript that has been copied into `node_modules`, and a linked folder is not a
+copy.
 
 An environment's skills are plain [Agent Skills](https://agentskills.io/specification)
 folders, so they also work without the harness. Each environment's README says how
@@ -55,7 +58,9 @@ export function android(options: AndroidOptions): Plugin {
     app: {
       skills: skillsIn(new URL("./skills", import.meta.url)),
       tools: { gradle: tool({ command: ["gradle-mcp"] }) },
-      agents: { android: agent({ description: "Builds and releases the Android app.", role: "...", tools: ["gradle"] }) },
+      agents: {
+        android: agent({ description: "Builds and releases the Android app.", role: "You build and release the Android app.", tools: ["gradle"] }),
+      },
     },
     commands: { doctor: { describe: "Say what this machine is missing.", run: check } },
   };
@@ -75,6 +80,8 @@ Rules every environment here keeps:
   and no step that writes one to disk.
 - **Ask first** before anything that leaves the machine: an upload, a submission, a
   change on someone's account.
+- **TypeScript**, with only syntax that can be erased: no enums, no namespaces, no
+  parameter properties.
 - Add the environment to `exports` in `package.json` and to the table above.
 
 ## License

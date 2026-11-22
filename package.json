@@ -9,6 +9,6 @@
   },
   "files": ["apple", "README.md", "LICENSE"],
   "peerDependencies": {
-    "@praecise/harness": ">=1.1.0"
+    "@praecise/harness": ">=1.0.0"
   }
 }
