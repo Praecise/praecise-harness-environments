@@ -34,6 +34,15 @@ const meta = (enrolled = true): { fetch: typeof fetch; asked: string[] } => {
     if (url === `${GRAPH}p7/feed` && init?.method === "POST") return Response.json({ id: "p7_1" });
     if (url === `${GRAPH}ig3/media` && init?.method === "POST") return Response.json({ id: "container-1" });
     if (url === `${GRAPH}ig3/media_publish`) return Response.json({ id: "media-1" });
+    if (url === `${GRAPH}container-1?fields=status_code`) return Response.json({ status_code: "FINISHED" });
+    if (url === `${GRAPH}p7_55` || url === `${GRAPH}17900000001`) return Response.json({ success: true });
+    if (url.startsWith(`${GRAPH}p7/conversations?platform=instagram`)) return Response.json({ data: [{ id: "t_1", participants: { data: [{ id: "77000001" }] } }] });
+    if (url === `${GRAPH}p7/messages`) return Response.json({ recipient_id: "77000001", message_id: "m1" });
+    if (url === "https://graph.threads.com/oauth/access_token") return Response.json({ access_token: "th-short", user_id: 1 });
+    if (url.startsWith("https://graph.threads.com/access_token?")) return Response.json({ access_token: "th-long", expires_in: 5_183_944 });
+    if (url === "https://graph.threads.com/v1.0/me?fields=id,username") return Response.json({ id: "th9000001", username: "acme" });
+    if (url === "https://graph.threads.com/v1.0/th9000001/threads") return Response.json({ id: "tc1" });
+    if (url === "https://graph.threads.com/v1.0/th9000001/threads_publish") return Response.json({ id: "tm1" });
     if (url.startsWith("https://graph.facebook.com/v27.0/oauth/access_token")) {
       return Response.json({ access_token: "meta-token", expires_in: 5_184_000 });
     }
@@ -63,9 +72,9 @@ const connected = async (
   const root = await mkdtemp(join(tmpdir(), "meta-marketing-"));
   const there = meta(enrolled);
   const environment = metaMarketing({ appId: "1234567890", callbackPort: 0, vault: vault(), ...options });
-  environment.use({ root, fetch: there.fetch, env: { META_APP_SECRET: "app-secret", META_WEBHOOK_VERIFY_TOKEN: "agreed" } });
+  environment.use({ root, fetch: there.fetch, env: { META_APP_SECRET: "app-secret", META_WEBHOOK_VERIFY_TOKEN: "agreed", THREADS_APP_SECRET: "threads-secret" } });
   let page = "";
-  await environment.connect({ open: async (address) => ((page = address), signIn(address)) });
+  await environment.connect({ open: async (address) => ((page ||= address), there.asked.push(`page ${new URL(address).origin}${new URL(address).pathname}`), signIn(address)) });
   await environment.sync();
   there.asked.unshift(page);
   return { environment, asked: there.asked, root };
@@ -195,5 +204,83 @@ test("signs in to one of Meta's servers by itself when asked to", async () => {
   assert.equal(whatsapp.separate, true);
   assert.deepEqual(whatsapp.scopes, ["business_management", "whatsapp_business_management", "whatsapp_business_messaging"]);
   assert.equal(asked.filter((line) => line.includes("/oauth/access_token")).length, 2);
+  await rm(root, { recursive: true, force: true });
+});
+
+const run = (environment: ReturnType<typeof metaMarketing>, name: string, args: Record<string, unknown>): Promise<unknown> =>
+  Promise.resolve().then(() => environment.app!.functions![name]!.run(args, {}));
+
+test("reads and answers conversations in Messenger and Instagram Direct, as the Page", async () => {
+  const { environment, asked, root } = await connected({ messaging: true });
+  assert.ok(new URL(asked[0]!).searchParams.get("scope")!.includes("pages_messaging instagram_manage_messages"));
+  assert.deepEqual(await run(environment, "meta_conversations", { page: "acme-page", platform: "instagram" }), [{ id: "t_1", participants: { data: [{ id: "77000001" }] } }]);
+  const sending = { page: "acme-page", to: "77000001", text: "On its way." };
+  await assert.rejects(run(environment, "meta_message_send", sending), /read mode/);
+  await environment.setMode("acme-page", "act");
+  const send = environment.app!.functions!.meta_message_send!;
+  assert.ok("stepUp" in (await environment.authority!.check({ agent: "app", tool: "meta_message_send", origin: "local", args: sending, action: send.action!(sending) })));
+  assert.deepEqual(await run(environment, "meta_message_send", sending), { recipient_id: "77000001", message_id: "m1" });
+  const sent = asked.find((line) => line.startsWith("Bearer page-token POST https://graph.facebook.com/v26.0/p7/messages"))!;
+  assert.ok(sent.includes("messaging_type=RESPONSE"));
+  assert.ok(decodeURIComponent(sent).includes('{"id":"77000001"}'));
+  await assert.rejects(run(environment, "meta_messages", { page: "acme-page", conversation: "t_1/../me" }), /is not a conversation/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("publishes a carousel and a reel, and hides or deletes a comment only with a person", async () => {
+  const { environment, asked, root } = await connected({ organic: true, profile: "act" });
+  await environment.setMode("acme-page/acme", "act");
+  await environment.setMode("acme-page", "act");
+  assert.deepEqual(await run(environment, "meta_instagram_publish", { account: "acme-page/acme", images: "https://cdn.example/a.jpg, https://cdn.example/b.jpg", caption: "Two" }), { id: "media-1" });
+  assert.ok(asked.some((line) => line.includes("ig3/media media_type=CAROUSEL&children=container-1%2Ccontainer-1&caption=Two")));
+  await assert.rejects(run(environment, "meta_instagram_publish", { account: "acme-page/acme", images: "https://cdn.example/a.jpg" }), /2 to 20/);
+
+  assert.deepEqual(await run(environment, "meta_instagram_publish", { account: "acme-page/acme", video: "https://cdn.example/a.mp4" }), { id: "media-1" });
+  assert.ok(asked.some((line) => line.includes("ig3/media media_type=REELS&video_url=")));
+  assert.ok(asked.some((line) => line.includes("container-1?fields=status_code")));
+
+  assert.deepEqual(await run(environment, "meta_page_comment_hide", { page: "acme-page", comment: "p7_55", hidden: "true" }), { success: true });
+  assert.ok(asked.some((line) => line.includes("POST https://graph.facebook.com/v26.0/p7_55 is_hidden=true")));
+  const removing = { account: "acme-page/acme", comment: "17900000001" };
+  const remove = environment.app!.functions!.meta_instagram_comment_delete!;
+  assert.ok("stepUp" in (await environment.authority!.check({ agent: "app", tool: "meta_instagram_comment_delete", origin: "local", args: removing, action: remove.action!(removing) })));
+  assert.deepEqual(await run(environment, "meta_instagram_comment_delete", removing), { success: true });
+  assert.ok(asked.some((line) => line.includes("DELETE https://graph.facebook.com/v26.0/17900000001")));
+  await rm(root, { recursive: true, force: true });
+});
+
+test("signs in to Threads by itself, trades for a lasting token, and publishes to the profile it finds", async () => {
+  const { environment, asked, root } = await connected({ threads: { appId: "threads-app", callbackPort: 0 } });
+  assert.deepEqual(asked.filter((line) => line.startsWith("page ")), ["page https://www.facebook.com/v27.0/dialog/oauth", "page https://threads.com/oauth/authorize"]);
+  assert.ok(asked.some((line) => line.includes("https://graph.threads.com/oauth/access_token") && line.includes("client_secret=threads-secret")));
+  assert.ok(asked.some((line) => line.includes("grant_type=th_exchange_token")));
+  const [profile] = await environment.accounts({ kind: "threads_profile" });
+  assert.equal(profile!.alias, "acme-threads");
+
+  const posting = { profile: "acme-threads", text: "hello" };
+  await assert.rejects(run(environment, "meta_threads_publish", posting), /read mode/);
+  await environment.setMode("acme-threads", "act");
+  assert.deepEqual(await run(environment, "meta_threads_publish", posting), { id: "tm1" });
+  assert.ok(asked.some((line) => line.startsWith("Bearer th-long POST https://graph.threads.com/v1.0/th9000001/threads media_type=TEXT&text=hello")));
+  // Meta's own servers and its Graph API are still asked with Meta's token, not Threads'.
+  assert.ok(asked.some((line) => line.startsWith("Bearer meta-token GET https://graph.facebook.com/v26.0/me/adaccounts")));
+  await assert.rejects(run(environment, "meta_threads_publish", { profile: "acme-threads", text: "x".repeat(501) }), /500 characters/);
+  await rm(root, { recursive: true, force: true });
+});
+
+test("launches a campaign as a draft and then one call that waits for a person", async () => {
+  const { environment, root } = await connected();
+  const launch = environment.app!.workflows!["meta-campaign-launch"] as { steps: { id: string; use?: string; with?: Record<string, string>; agent?: string }[] };
+  assert.deepEqual(launch.steps.map((step) => step.id), ["draft", "activate"]);
+  assert.equal(launch.steps[0]!.agent, "meta-campaign-drafter");
+  assert.deepEqual(launch.steps[1]!.with, { server: "ads", tool: "ads_activate_entity", account: "{{account}}", arguments: "{{draft.activation}}" });
+
+  // The call the second step makes: it names the account beside the tool's own arguments.
+  const call = environment.app!.functions!.meta_marketing_call!;
+  const args = { server: "ads", tool: "ads_activate_entity", account: "acme/eu-store", arguments: '{"entity_id":"120200000000001"}' };
+  const asking = { agent: "app", tool: "meta_marketing_call", origin: "local" as const, args, action: call.action!(args) };
+  assert.match(((await environment.authority!.check(asking)) as { refuse: string }).refuse, /read mode and this needs act/);
+  await environment.setMode("acme/eu-store", "act");
+  assert.ok("stepUp" in (await environment.authority!.check(asking)));
   await rm(root, { recursive: true, force: true });
 });

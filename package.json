@@ -1,6 +1,6 @@
 {
   "name": "@praecise/harness-environments",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Environments for praecise-harness: one platform and one kind of work each, as a plugin for Claude and an environment for the harness",
   "license": "Apache-2.0",
   "type": "module",
@@ -11,6 +11,6 @@
   },
   "files": ["apple-development", "meta-marketing", "README.md", "LICENSE"],
   "peerDependencies": {
-    "@praecise/harness": ">=1.2.0"
+    "@praecise/harness": ">=1.2.1"
   }
 }

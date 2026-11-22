@@ -19,7 +19,7 @@ Each environment is two things from one folder:
 | Environment | For | Status |
 |---|---|---|
 | [Apple development](apple-development/) | Building, testing, signing and releasing apps for iOS, iPadOS, macOS, tvOS, watchOS and visionOS, with Xcode | 0.2.0 |
-| [Meta Platforms marketing](meta-marketing/) | Advertising on Facebook and Instagram, Page and Instagram publishing and comments, and WhatsApp Business messaging, through Meta's own MCP servers and the Graph API | 0.2.0 |
+| [Meta Platforms marketing](meta-marketing/) | Advertising on Facebook and Instagram, Page and Instagram publishing, comments and conversations, Threads, and WhatsApp Business messaging, through Meta's own MCP servers and its APIs | 0.3.0 |
 
 ## Use one
 
@@ -37,7 +37,7 @@ import { appleDevelopment } from "@praecise/harness-environments/apple-developme
 export default defineConfig({ plugins: [appleDevelopment({ /* your team's values */ })] });
 ```
 
-Both environments need `@praecise/harness` 1.2.0 or later, the first with
+Both environments need `@praecise/harness` 1.2.1 or later, the first with
 `environment()`, and Node 24, which runs the TypeScript here as it is. Install
 from a clone, as above: Node does not run TypeScript that has been copied into
 `node_modules`, and a linked folder is not a copy.

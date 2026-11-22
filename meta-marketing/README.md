@@ -1,8 +1,8 @@
 # Meta Platforms marketing environment for Claude by Praecise
 
 Lets Claude run marketing on Meta Platforms for the accounts you connect:
-advertising on Facebook and Instagram, a Page's and an Instagram account's posts and
-comments, and WhatsApp Business messaging. It works in a
+advertising on Facebook and Instagram, a Page's and an Instagram account's posts,
+comments and conversations, Threads, and WhatsApp Business messaging. It works in a
 praecise-harness app, where one sign-in covers every account and each account has its
 own limits, and in Claude Code as a plugin.
 
@@ -49,7 +49,7 @@ import { metaMarketing } from "@praecise/harness-environments/meta-marketing";
 
 export default defineConfig({
   plugins: [metaMarketing({ appId: "your Meta app's App ID", profile: "read" })],
-  // also: organic: true, rules: true, separate: ["whatsapp"]
+  // also: organic: true, messaging: true, threads: { appId: "..." }, rules: true, separate: ["whatsapp"]
 });
 ```
 
@@ -101,21 +101,55 @@ account in draft mode. Activating, updating, boosting, sending and anything else
 goes live needs act mode and a person's approval, and deleting always does. A change
 that names no account is refused.
 
-With `organic: true` there are eight more, on the Graph API as the Page itself:
+With `organic: true` a Page and its Instagram account are worked on through the Graph
+API, as the Page itself:
 
 | Function | Does |
 |---|---|
 | `meta_page_posts`, `meta_page_comments` | Read a Page's posts, and the comments on one |
 | `meta_page_post` | Publish a post now, or at a time up to 30 days ahead |
 | `meta_page_comment` | Comment on a post as the Page |
+| `meta_page_comment_hide`, `meta_page_comment_delete` | Hide or show a comment; delete one |
 | `meta_instagram_media`, `meta_instagram_comments` | Read an Instagram account's posts, and the comments on one |
-| `meta_instagram_publish` | Publish one JPEG image |
+| `meta_instagram_publish` | Publish one JPEG, a reel from one video, or a carousel of 2 to 20 JPEGs |
 | `meta_instagram_reply` | Reply to a comment |
+| `meta_instagram_comment_hide`, `meta_instagram_comment_delete` | Hide or show a comment; delete one |
 
-Publishing and replying need the Page or the Instagram account in act mode and a
-person's approval. The Meta app needs the Page and Instagram permissions these ask
-for (`pages_read_engagement`, `pages_manage_posts`, `pages_manage_engagement`,
-`instagram_manage_comments`, `instagram_content_publish`).
+With `messaging: true` the conversations a Page has in Messenger, and its Instagram
+account has in Instagram Direct, can be read and answered:
+
+| Function | Does |
+|---|---|
+| `meta_conversations` | List recent conversations, on `messenger` or `instagram` |
+| `meta_messages` | Read one conversation's latest messages; Meta gives the 20 most recent |
+| `meta_message_send` | Reply to the person, as the Page |
+
+Meta takes a reply only within 24 hours of the person's last message. Reading and
+answering conversations with people who have no role on your business needs Meta's
+Advanced Access.
+
+With `threads: { appId }` a Threads profile is worked on through the Threads API:
+
+| Function | Does |
+|---|---|
+| `meta_threads_posts` | Read the profile's recent posts |
+| `meta_threads_publish` | Publish text of up to 500 characters, with one image if given |
+| `meta_threads_insights` | Views, likes, replies, reposts and quotes over a period |
+| `meta_threads_reply_hide` | Hide a reply and those under it, or show it again |
+
+Threads has an app, a sign-in page and a token of its own, so `connect` opens a second
+page for it straight after Meta's. `appId` is the Threads App ID, the Threads app
+secret is read from `THREADS_APP_SECRET`, and `http://localhost:8766/callback` must be
+among the Threads app's redirect addresses (or the port you give). The token Threads
+returns lasts an hour; the environment trades it at once for one that lasts sixty
+days and renews that before it runs out.
+
+Publishing, sending, replying and hiding need the account in act mode and a person's
+approval; deleting always needs a person. The Meta app needs the permissions these
+ask for: `pages_read_engagement`, `pages_manage_posts`, `pages_manage_engagement`,
+`instagram_manage_comments` and `instagram_content_publish` for `organic`, and
+`pages_messaging`, `pages_manage_metadata` and `instagram_manage_messages` for
+`messaging`.
 
 With `rules: true` an ad account's mode and limits are also written to Meta as its own
 rules for agents, so Meta refuses what the account forbids whichever client asks: read
@@ -129,8 +163,17 @@ other servers does not, list it in `separate` (`"instagram"`, `"whatsapp"`,
 `"developer"`): `connect` then signs in to it by itself straight after the first, in
 the same browser.
 
-The workflow `meta-weekly-report` reports on one ad account for the last seven days
-against the seven before.
+Two workflows come with it. `meta-weekly-report` reports on one ad account for the
+last seven days against the seven before. `meta-campaign-launch` takes an ad account
+and a brief: an agent drafts the campaign paused and previews it, and switching it on
+is a second step that stops at an approval gate until a person agrees to exactly that
+call. The ad account must be in act mode for the second step.
+
+A tool of Meta's that the environment does not list, such as those of the Instagram
+server, is classed by what the server says of it: a tool it marks as only reading is a
+read, one it marks as destructive destroys, and anything else is treated as publishing.
+A tool that takes only something inside an account, such as a campaign, is given the
+account's name in `account`, beside its own arguments.
 
 For comments, messages and other deliveries from Meta, point the Meta app's webhook at
 `/environments/meta-marketing/intake` on the app's server and set `META_APP_SECRET`
@@ -153,18 +196,18 @@ asks before it changes anything, and Meta creates campaigns, ad sets and ads pau
 ## What has not been tried against Meta itself
 
 Everything here is built from what Meta publishes and from what its servers answer
-without a sign-in, and is tested against a stand-in for Meta. Three things only a real
-sign-in shows:
+without a sign-in, and is tested against a stand-in for Meta. A real sign-in is what
+shows:
 
 - Whether Meta takes the one token on its WhatsApp, Instagram and Social Technologies
   servers. `separate` is there for the ones that do not.
-- The tools of the Instagram server, which Meta has not documented. Until they are
-  listed in the environment, each is treated as publishing and needs a person.
+- The tools of the Instagram server, which Meta has not documented.
 - Whether your business is enrolled for Meta's rules for agents.
+- Whether Threads accepts a redirect to this machine, and its token in a header.
 
-Not in this version: Messenger and Instagram direct messages, Instagram video and
-carousels, hiding or deleting comments, and Threads, whose server answers but about
-which Meta has published nothing.
+Not here because Meta does not publish them: Threads' own MCP server, which answers
+but has no documentation, and replying to a comment on a Page (commenting on the post
+is there).
 
 The guard holds a call to the accounts it names. A campaign, ad set or ad inside an
 account is named to Meta by Meta's own id, and it is Meta that checks which account it

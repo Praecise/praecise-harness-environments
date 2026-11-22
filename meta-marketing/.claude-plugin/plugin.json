@@ -1,6 +1,6 @@
 {
   "name": "meta-marketing",
   "description": "Meta Platforms marketing environment for Claude by Praecise: audit, report, draft campaigns and set up WhatsApp Business messaging through Meta's own MCP servers.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": { "name": "Praecise" }
 }
