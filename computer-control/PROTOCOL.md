@@ -58,5 +58,16 @@ Anything it has to say that is not an answer goes to standard error.
 | `press`, `release` | `app`, `button` | Hold a button down, and let it go. |
 | `hold` | `app`, `combo`, `seconds` | |
 
+A helper that lists `record` in `can` also answers:
+
+| Method | Params | Result |
+|---|---|---|
+| `record_start` | `app`, `seconds?` (the longest it may run), `audio?`, `fps?` | `{ recording, seconds, width, height }`. One recording per app at a time. |
+| `record_stop` | `recording` | `{ recording, path, mime, bytes, seconds }`. The file stays on the machine. |
+| `frames` | `recording`, `count?` | `{ recording, seconds, frames: [{ mime, data, name, at }] }`: pictures spread evenly through it. |
+
+Recordings are kept in one folder of the helper's own, for a day and within a size
+limit, the oldest removed first. A helper that cannot keep within that refuses to start.
+
 `states` are words from: `disabled`, `focused`, `checked`, `partly checked`, `pressed`,
 `expanded`, `collapsed`, `selected`, `required`, `invalid`.

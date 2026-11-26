@@ -614,6 +614,122 @@ def key(params):
     return None
 
 
+# Recording, on X11
+
+RECORDINGS = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "praecise-control", "recordings")
+# What recordings may take up together, and how long one is kept. Older ones go first.
+KEPT_BYTES = int(os.environ.get("PRAECISE_CONTROL_RECORDINGS_BYTES") or 2 * 1024 ** 3)
+KEPT_SECONDS = 24 * 3600
+LONGEST = 600
+recording = {}   # id -> {process, path, started, limit}
+
+
+def prune():
+    """Keep what is recorded within its bounds: nothing older than a day, and no more than the cap in all."""
+    try:
+        kept = sorted((os.path.join(RECORDINGS, name) for name in os.listdir(RECORDINGS)), key=os.path.getmtime)
+    except OSError:
+        return 0
+    busy = {each["path"] for each in recording.values()}
+    total = 0
+    for path in kept:
+        if path not in busy and time.time() - os.path.getmtime(path) > KEPT_SECONDS:
+            os.remove(path)
+    kept = [path for path in kept if os.path.exists(path)]
+    total = sum(os.path.getsize(path) for path in kept)
+    for path in kept:
+        if total <= KEPT_BYTES:
+            break
+        if path not in busy:
+            total -= os.path.getsize(path)
+            os.remove(path)
+    return total
+
+
+def ffmpeg():
+    from shutil import which
+    found = which("ffmpeg")
+    if not found:
+        raise Failure("recording needs ffmpeg, which is not installed on this machine")
+    return found
+
+
+def record_start(params):
+    ident, _, rect = target(params)
+    if WAYLAND:
+        raise Failure("recording a window on Wayland needs the ScreenCast portal, which this helper does not use yet")
+    if any(each["app"] == ident for each in recording.values()):
+        raise Failure("%s is already being recorded; stop that first" % ident)
+    os.makedirs(RECORDINGS, mode=0o700, exist_ok=True)
+    if prune() >= KEPT_BYTES:
+        raise Failure("the recordings kept here have reached their limit and none can be removed; stop one that is running")
+    limit = max(1, min(LONGEST, int(params.get("seconds") or 60)))
+    rate = max(1, min(30, int(params.get("fps") or 10)))
+    name = "%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), "".join(ch for ch in ident if ch.isalnum() or ch in "-_")[:40])
+    path = os.path.join(RECORDINGS, name + ".mp4")
+    # A picture's sides have to be even for the usual way of encoding one.
+    width, height = rect.width - rect.width % 2, rect.height - rect.height % 2
+    command = [ffmpeg(), "-loglevel", "error", "-y", "-f", "x11grab", "-framerate", str(rate), "-video_size", "%dx%d" % (width, height),
+               "-i", "%s+%d,%d" % (os.environ.get("DISPLAY", ":0"), rect.x, rect.y)]
+    if params.get("audio"):
+        command += ["-f", "pulse", "-i", "default"]
+    command += ["-t", str(limit), "-pix_fmt", "yuv420p", "-movflags", "+faststart", path]
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    recording[name] = {"process": process, "path": path, "started": time.time(), "limit": limit, "app": ident}
+    return {"recording": name, "seconds": limit, "width": width, "height": height}
+
+
+def record_stop(params):
+    name = str(params.get("recording") or "")
+    held = recording.pop(name, None)
+    if held is None:
+        raise Failure("%s is not a recording that is running" % (name or "that"))
+    process = held["process"]
+    if process.poll() is None:
+        try:
+            # Asked to finish, so that what it wrote can be played.
+            process.stdin.write(b"q")
+            process.stdin.flush()
+        except OSError:
+            pass
+    try:
+        said = process.communicate(timeout=20)[1].decode("utf-8", "replace").strip()
+    except subprocess.TimeoutExpired:
+        process.kill()
+        said = "it did not finish and was stopped"
+    if not os.path.exists(held["path"]) or os.path.getsize(held["path"]) == 0:
+        raise Failure("nothing was recorded: %s" % (said[-300:] or "the recorder wrote nothing"))
+    return {"recording": name, "path": held["path"], "mime": "video/mp4", "bytes": os.path.getsize(held["path"]),
+            "seconds": round(min(time.time() - held["started"], held["limit"]), 1)}
+
+
+def frames(params):
+    """Pictures from a recording, spread evenly through it."""
+    name = os.path.basename(str(params.get("recording") or ""))
+    path = os.path.join(RECORDINGS, name if name.endswith(".mp4") else name + ".mp4")
+    if not name or not os.path.exists(path):
+        raise Failure("there is no recording called %s here" % (name or "that"))
+    count = max(1, min(12, int(params.get("count") or 4)))
+    probe = subprocess.run([ffmpeg(), "-i", path], stdin=subprocess.DEVNULL, capture_output=True, text=True).stderr
+    length = 0.0
+    for line in probe.splitlines():
+        if "Duration:" in line:
+            hours, minutes, seconds = line.split("Duration:")[1].split(",")[0].strip().split(":")
+            length = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    if length <= 0:
+        raise Failure("%s cannot be read as a recording" % name)
+    out = []
+    for nth in range(count):
+        at = length * (nth + 0.5) / count
+        shot = subprocess.run([ffmpeg(), "-loglevel", "error", "-ss", "%.3f" % at, "-i", path, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
+                              stdin=subprocess.DEVNULL, capture_output=True)
+        if shot.returncode == 0 and shot.stdout:
+            out.append({"mime": "image/png", "data": base64.b64encode(shot.stdout).decode("ascii"), "name": "frame-%.1fs.png" % at, "at": round(at, 1)})
+    if not out:
+        raise Failure("no picture could be taken from %s" % name)
+    return {"recording": name, "seconds": round(length, 1), "frames": out}
+
+
 def cursor(params):
     x, y = pointer.get(str(params.get("app") or ""), (0, 0))
     return {"x": x, "y": y}
@@ -631,7 +747,7 @@ def hello(_params):
         "system": "linux",
         "user": getpass.getuser(),
         "host": socket.gethostname(),
-        "can": ["activate", "fill"],
+        "can": ["activate", "fill"] + (["record"] if not WAYLAND else []),
         "needs": [
             {"name": "Accessibility bindings", "ok": Atspi is not None, "fix": "Install python3-gi and gir1.2-atspi-2.0."},
             {"name": "Accessibility bus", "ok": reached, "fix": "Start the helper inside the desktop session, with at-spi2-core installed."},
@@ -642,7 +758,7 @@ def hello(_params):
 METHODS = {
     "hello": hello, "apps": apps, "open": open_app, "window": window, "screenshot": screenshot, "read": read, "locate": locate,
     "activate": activate, "fill": fill, "click": click, "move": move, "drag": drag, "scroll": scroll, "type": type_text,
-    "key": key, "cursor": cursor,
+    "key": key, "cursor": cursor, "record_start": record_start, "record_stop": record_stop, "frames": frames,
 }
 
 paused = False
