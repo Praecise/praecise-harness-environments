@@ -7,6 +7,13 @@
 // reached another way.
 //
 // Only public API is used.
+//
+// It runs three ways from the one program. As Praecise Control, an app in the menu bar:
+// it holds the two permissions under its own name, answers on a socket only this user
+// can open, says what an agent is using, and can be paused. With `connect`: it passes
+// its input to that app and the app's answers back, which is how a harness reaches it.
+// With `--stdio`, or built as a plain program: it answers on its own input and output,
+// with the permissions of whatever started it.
 
 import AppKit
 import ApplicationServices
@@ -553,25 +560,228 @@ func answer(_ method: String, _ params: [String: Any]) throws -> Any {
   }
 }
 
-func say(_ line: [String: Any]) {
-  guard let data = try? JSONSerialization.data(withJSONObject: line, options: [.withoutEscapingSlashes]) else { return }
-  FileHandle.standardOutput.write(data)
-  FileHandle.standardOutput.write(Data([0x0A]))
-}
+// MARK: Answering
 
-// A picture of a window needs a connection to the window server, which a program with no
-// interface of its own does not have until it asks for one. It takes no place in the Dock.
-NSApplication.shared.setActivationPolicy(.prohibited)
+/// Set from the menu. While it is, nothing but `hello` is answered.
+var paused = false
+/// The app an agent last asked about, and when, for the menu.
+var lastApp = ""
+var lastAsked = Date.distantPast
 
-while let line = readLine(strippingNewline: true) {
-  guard let data = line.data(using: .utf8), let asked = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let id = asked["id"] else { continue }
+/// One line in, one line out. Everything a helper knows is touched from here and nowhere else at once.
+func handle(_ line: String) -> String? {
+  guard let data = line.data(using: .utf8), let asked = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let id = asked["id"] else { return nil }
   let method = asked["method"] as? String ?? ""
   let params = asked["params"] as? [String: Any] ?? [:]
+  var answered: [String: Any] = ["id": id]
   do {
-    say(["id": id, "result": try answer(method, params)])
+    if paused, method != "hello" { throw Failure(message: "Praecise Control is paused by the person at this machine") }
+    if let app = params["app"] as? String, !app.isEmpty {
+      lastApp = running(app)?.localizedName ?? app
+      lastAsked = Date()
+    }
+    answered["result"] = try answer(method, params)
   } catch let failure as Failure {
-    say(["id": id, "error": failure.message])
+    answered["error"] = failure.message
   } catch {
-    say(["id": id, "error": error.localizedDescription])
+    answered["error"] = error.localizedDescription
   }
+  guard let out = try? JSONSerialization.data(withJSONObject: answered, options: [.withoutEscapingSlashes]) else { return nil }
+  return String(data: out, encoding: .utf8)
+}
+
+func stdio() {
+  while let line = readLine(strippingNewline: true) {
+    guard let answered = handle(line) else { continue }
+    FileHandle.standardOutput.write(Data((answered + "\n").utf8))
+  }
+}
+
+// MARK: The socket between the app and whatever connects to it
+
+let SUPPORT = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Praecise Control")
+let SOCKET = SUPPORT.appendingPathComponent("control.sock").path
+
+func address() -> sockaddr_un {
+  var address = sockaddr_un()
+  address.sun_family = sa_family_t(AF_UNIX)
+  let path = Array(SOCKET.utf8)
+  withUnsafeMutableBytes(of: &address.sun_path) { raw in
+    for (at, byte) in path.prefix(raw.count - 1).enumerated() { raw[at] = byte }
+  }
+  return address
+}
+
+func dial() -> Int32? {
+  let made = socket(AF_UNIX, SOCK_STREAM, 0)
+  guard made >= 0 else { return nil }
+  var to = address()
+  let joined = withUnsafePointer(to: &to) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(made, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+  if joined != 0 { close(made); return nil }
+  return made
+}
+
+/// Lines from a descriptor, each handed on as it completes.
+func lines(from descriptor: Int32, _ each: (String) -> Void) {
+  var held = Data()
+  var buffer = [UInt8](repeating: 0, count: 65_536)
+  while true {
+    let count = read(descriptor, &buffer, buffer.count)
+    if count <= 0 { return }
+    held.append(buffer, count: count)
+    while let end = held.firstIndex(of: 0x0A) {
+      let line = String(data: held.subdata(in: held.startIndex..<end), encoding: .utf8) ?? ""
+      held.removeSubrange(held.startIndex...end)
+      each(line)
+    }
+  }
+}
+
+func send(_ text: String, to descriptor: Int32) {
+  let bytes = Array((text + "\n").utf8)
+  var sent = 0
+  while sent < bytes.count {
+    let wrote = bytes[sent...].withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+    if wrote <= 0 { return }
+    sent += wrote
+  }
+}
+
+/// One at a time: a helper's references and pointer are one set, whoever is asking.
+let work = DispatchQueue(label: "com.praecise.control.work")
+
+func serve() throws {
+  try FileManager.default.createDirectory(at: SUPPORT, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+  if let already = dial() { close(already); throw Failure(message: "Praecise Control is already running") }
+  unlink(SOCKET)
+  let listening = socket(AF_UNIX, SOCK_STREAM, 0)
+  var at = address()
+  let bound = withUnsafePointer(to: &at) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listening, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+  // Only this user can open it.
+  guard listening >= 0, bound == 0, chmod(SOCKET, 0o600) == 0, listen(listening, 8) == 0 else { throw Failure(message: "Praecise Control could not listen at \(SOCKET)") }
+  Thread.detachNewThread {
+    while true {
+      let joined = accept(listening, nil, nil)
+      if joined < 0 { continue }
+      Thread.detachNewThread {
+        lines(from: joined) { line in
+          if let answered = work.sync(execute: { handle(line) }) { send(answered, to: joined) }
+        }
+        close(joined)
+      }
+    }
+  }
+}
+
+/// Pass this program's input to the app and the app's answers back.
+func relay() -> Never {
+  var joined = dial()
+  if joined == nil, Bundle.main.bundlePath.hasSuffix(".app") {
+    // Started behind what the person is doing, and given a moment to listen.
+    let start = Process()
+    start.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    start.arguments = ["-g", Bundle.main.bundlePath]
+    try? start.run()
+    start.waitUntilExit()
+    for _ in 0..<50 where joined == nil {
+      usleep(100_000)
+      joined = dial()
+    }
+  }
+  guard let to = joined else {
+    FileHandle.standardError.write(Data("Praecise Control is not running; open it from Applications\n".utf8))
+    exit(69)
+  }
+  let answered = DispatchSemaphore(value: 0)
+  Thread.detachNewThread {
+    lines(from: to) { FileHandle.standardOutput.write(Data(($0 + "\n").utf8)) }
+    answered.signal()
+  }
+  lines(from: 0) { send($0, to: to) }
+  // Nothing more will be asked. What was asked is still answered before this ends.
+  shutdown(to, SHUT_WR)
+  answered.wait()
+  exit(0)
+}
+
+// MARK: The app in the menu bar
+
+final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
+  var item: NSStatusItem!
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    do { try serve() } catch {
+      let alert = NSAlert()
+      alert.messageText = (error as? Failure)?.message ?? error.localizedDescription
+      alert.runModal()
+      NSApp.terminate(nil)
+      return
+    }
+    item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    let menu = NSMenu()
+    menu.delegate = self
+    item.menu = menu
+    picture()
+  }
+
+  func picture() {
+    let image = NSImage(systemSymbolName: paused ? "pause.circle" : "cursorarrow.rays", accessibilityDescription: paused ? "Praecise Control, paused" : "Praecise Control")
+    image?.isTemplate = true
+    item.button?.image = image
+    if image == nil { item.button?.title = "Praecise" }
+  }
+
+  func add(_ title: String, _ action: Selector?, to menu: NSMenu) {
+    let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    entry.target = self
+    menu.addItem(entry)
+  }
+
+  /// Built as it is opened, so it says what is true now.
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    menu.removeAllItems()
+    let recent = Date().timeIntervalSince(lastAsked) < 60
+    add(paused ? "Paused: agents are refused" : recent ? "An agent is using \(lastApp)" : "No agent is using this Mac", nil, to: menu)
+    add(paused ? "Resume" : "Pause", #selector(pause), to: menu)
+    menu.addItem(.separator())
+    add(AXIsProcessTrusted() ? "Accessibility: allowed" : "Allow Accessibility…", AXIsProcessTrusted() ? nil : #selector(accessibility), to: menu)
+    add(CGPreflightScreenCaptureAccess() ? "Screen Recording: allowed" : "Allow Screen Recording…", CGPreflightScreenCaptureAccess() ? nil : #selector(recording), to: menu)
+    menu.addItem(.separator())
+    add("Quit Praecise Control", #selector(quit), to: menu)
+  }
+
+  @objc func pause() {
+    work.sync { paused.toggle() }
+    picture()
+  }
+  @objc func accessibility() {
+    // The system's own question, which takes the person to the setting.
+    _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+  }
+  @objc func recording() {
+    if !CGRequestScreenCaptureAccess(), let pane = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(pane) }
+  }
+  @objc func quit() {
+    unlink(SOCKET)
+    NSApp.terminate(nil)
+  }
+}
+
+// MARK: Which way it was started
+
+let asked = CommandLine.arguments.dropFirst().first
+if asked == "connect" { relay() }
+
+if asked != "--stdio", Bundle.main.bundlePath.hasSuffix(".app") {
+  // An app with no window and no place in the Dock: it lives in the menu bar.
+  let app = NSApplication.shared
+  let menu = Menu()
+  app.delegate = menu
+  app.setActivationPolicy(.accessory)
+  app.run()
+} else {
+  // A picture of a window needs a connection to the window server, which a program with no
+  // interface of its own does not have until it asks for one. It takes no place in the Dock.
+  NSApplication.shared.setActivationPolicy(.prohibited)
+  stdio()
 }

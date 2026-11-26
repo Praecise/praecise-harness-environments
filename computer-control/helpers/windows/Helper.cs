@@ -11,6 +11,13 @@
 // keyboard the session has.
 //
 // It is built with the compiler that is part of Windows and needs nothing installed.
+//
+// It is built twice from this one file. As Praecise Control, an app in the taskbar's
+// corner: it runs in the session of whoever is signed in, answers on a pipe only that
+// person's programs can open, says what an agent is using, and can be paused. As the
+// helper, a program with no window: with `connect` it passes its input to that app and
+// the app's answers back, which is how a harness reaches it from a service or over SSH;
+// with nothing, it answers on its own input and output where it stands.
 
 using System;
 using System.Collections;
@@ -20,8 +27,10 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Automation;
 
@@ -62,6 +71,62 @@ static class Native {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
   [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
+}
+
+/// This program's own input or output.
+///
+/// What starts a program decides what kind of handle these are, and an SSH server hands
+/// over a kind that an ordinary read waits on for ever. Read and written this way, either
+/// kind works.
+sealed class Std : Stream {
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int which);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadFile(IntPtr handle, IntPtr buffer, int count, out int done, ref NativeOverlapped pending);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool WriteFile(IntPtr handle, IntPtr buffer, int count, out int done, ref NativeOverlapped pending);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetOverlappedResult(IntPtr handle, ref NativeOverlapped pending, out int done, bool wait);
+
+  readonly IntPtr handle;
+  readonly bool input;
+
+  public Std(bool input) {
+    this.input = input;
+    handle = GetStdHandle(input ? -10 : -11);
+  }
+
+  delegate bool Transfer(IntPtr handle, IntPtr buffer, int count, out int done, ref NativeOverlapped pending);
+
+  /// One read or write, waited for whether or not the handle answers at once. Nothing done is the end.
+  int Once(Transfer transfer, byte[] buffer, int offset, int count) {
+    var held = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+    try {
+      using (var finished = new ManualResetEvent(false)) {
+        var pending = new NativeOverlapped { EventHandle = finished.SafeWaitHandle.DangerousGetHandle() };
+        int done;
+        if (transfer(handle, IntPtr.Add(held.AddrOfPinnedObject(), offset), count, out done, ref pending)) return done;
+        if (Marshal.GetLastWin32Error() != 997) return 0;
+        return GetOverlappedResult(handle, ref pending, out done, true) ? done : 0;
+      }
+    } finally {
+      held.Free();
+    }
+  }
+
+  public override int Read(byte[] buffer, int offset, int count) { return Once(ReadFile, buffer, offset, count); }
+  public override void Write(byte[] buffer, int offset, int count) {
+    while (count > 0) {
+      var wrote = Once(WriteFile, buffer, offset, count);
+      if (wrote <= 0) throw new IOException("the other end has gone");
+      offset += wrote;
+      count -= wrote;
+    }
+  }
+  public override bool CanRead { get { return input; } }
+  public override bool CanWrite { get { return !input; } }
+  public override bool CanSeek { get { return false; } }
+  public override void Flush() { }
+  public override long Length { get { throw new NotSupportedException(); } }
+  public override long Position { get { throw new NotSupportedException(); } set { throw new NotSupportedException(); } }
+  public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+  public override void SetLength(long value) { throw new NotSupportedException(); }
 }
 
 static class Helper {
@@ -644,25 +709,35 @@ static class Helper {
     }
   }
 
-  static int Main() {
-    // Positions are in the pixels the window is really drawn in, whatever the display is scaled by.
-    Native.SetProcessDPIAware();
-    var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 256 };
-    var input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
-    var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
-    string line;
-    while ((line = input.ReadLine()) != null) {
+  // Answering
+
+  /// Set from the menu. While it is, nothing but `hello` is answered.
+  public static volatile bool Paused = false;
+  /// The app an agent last asked about, and when, for the menu.
+  public static string LastApp = "";
+  public static DateTime LastAsked = DateTime.MinValue;
+  static readonly object Turn = new object();
+  static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 256 };
+
+  /// One line in, one line out, one at a time: a helper's references and pointer are one set, whoever is asking.
+  public static string Handle(string line) {
+    lock (Turn) {
       Dictionary<string, object> asked;
       object id;
       try {
-        asked = json.Deserialize<Dictionary<string, object>>(line);
-        if (asked == null || !asked.TryGetValue("id", out id)) continue;
+        asked = Json.Deserialize<Dictionary<string, object>>(line);
+        if (asked == null || !asked.TryGetValue("id", out id)) return null;
       } catch (Exception) {
-        continue;
+        return null;
       }
       var answer = new Dictionary<string, object> { {"id", id} };
       try {
-        answer["result"] = Answer(Text(asked, "method") ?? "", Part(asked, "params") ?? new Dictionary<string, object>());
+        var method = Text(asked, "method") ?? "";
+        var given = Part(asked, "params") ?? new Dictionary<string, object>();
+        if (Paused && method != "hello") throw new Failure("Praecise Control is paused by the person at this machine");
+        var app = Text(given, "app");
+        if (!string.IsNullOrEmpty(app)) { LastApp = app; LastAsked = DateTime.Now; }
+        answer["result"] = Answer(method, given);
       } catch (Failure failure) {
         answer["error"] = failure.Message;
       } catch (ElementNotAvailableException) {
@@ -670,8 +745,124 @@ static class Helper {
       } catch (Exception err) {
         answer["error"] = err.GetType().Name + ": " + err.Message;
       }
-      output.WriteLine(json.Serialize(answer));
+      return Json.Serialize(answer);
     }
+  }
+
+  static void Lines(Stream from, Stream to) {
+    var input = new StreamReader(from, new UTF8Encoding(false));
+    var output = new StreamWriter(to, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
+    string line;
+    while ((line = input.ReadLine()) != null) {
+      var answered = Handle(line);
+      if (answered != null) output.WriteLine(answered);
+    }
+  }
+
+  /// The pipe is this person's: its name carries theirs, and only their programs can open it.
+  public static string Pipe { get { return "praecise-control-" + Environment.UserName.ToLowerInvariant(); } }
+
+  public static void Serve() {
+    var listening = new Thread(() => {
+      while (true) {
+        var pipe = new NamedPipeServerStream(Pipe, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, PipeOptions.None);
+        pipe.WaitForConnection();
+        var joined = pipe;
+        var each = new Thread(() => {
+          try { Lines(joined, joined); } catch (IOException) { } finally { joined.Dispose(); }
+        });
+        each.IsBackground = true;
+        each.Start();
+      }
+    });
+    listening.IsBackground = true;
+    listening.Start();
+  }
+
+  /// Pass this program's input to the app and the app's answers back.
+  static int Relay() {
+    var pipe = new NamedPipeClientStream(".", Pipe, PipeDirection.InOut);
+    try {
+      pipe.Connect(3000);
+    } catch (Exception) {
+      Console.Error.WriteLine("Praecise Control is not running in the signed-in session; start it there");
+      return 69;
+    }
+    var back = new Thread(() => {
+      try { pipe.CopyTo(new Std(false)); } catch (IOException) { }
+      Environment.Exit(0);
+    });
+    back.IsBackground = true;
+    back.Start();
+    var input = new Std(true);
+    var buffer = new byte[65536];
+    int count;
+    try {
+      while ((count = input.Read(buffer, 0, buffer.Length)) > 0) { pipe.Write(buffer, 0, count); pipe.Flush(); }
+      // Nothing more will be asked. What was asked is still answered before this ends.
+      pipe.WaitForPipeDrain();
+    } catch (IOException) { }
+    back.Join(5000);
     return 0;
   }
+
+  [STAThread]
+  static int Main(string[] arguments) {
+    // Positions are in the pixels the window is really drawn in, whatever the display is scaled by.
+    Native.SetProcessDPIAware();
+    if (arguments.Length > 0 && arguments[0] == "connect") return Relay();
+#if TRAY
+    return Tray.Run();
+#else
+    Lines(new Std(true), new Std(false));
+    return 0;
+#endif
+  }
 }
+
+#if TRAY
+/// Praecise Control in the corner of the taskbar: what an agent is using, a way to pause it, and nothing else.
+static class Tray {
+  const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+
+  public static int Run() {
+    bool first;
+    using (var only = new Mutex(true, "praecise-control-" + Environment.UserName.ToLowerInvariant(), out first)) {
+      if (!first) return 0;
+      Helper.Serve();
+      System.Windows.Forms.Application.EnableVisualStyles();
+      var icon = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Application, Text = "Praecise Control", Visible = true };
+      var menu = new System.Windows.Forms.ContextMenuStrip();
+      // Built as it is opened, so it says what is true now.
+      menu.Opening += delegate {
+        menu.Items.Clear();
+        var recent = (DateTime.Now - Helper.LastAsked).TotalSeconds < 60;
+        var state = menu.Items.Add(Helper.Paused ? "Paused: agents are refused" : recent ? "An agent is using " + Helper.LastApp : "No agent is using this computer");
+        state.Enabled = false;
+        menu.Items.Add(Helper.Paused ? "Resume" : "Pause", null, delegate { Helper.Paused = !Helper.Paused; icon.Text = Helper.Paused ? "Praecise Control, paused" : "Praecise Control"; });
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        var starts = new System.Windows.Forms.ToolStripMenuItem("Start when I sign in") { Checked = Starts() };
+        starts.Click += delegate { Start(!Starts()); };
+        menu.Items.Add(starts);
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add("Quit Praecise Control", null, delegate { icon.Visible = false; System.Windows.Forms.Application.Exit(); });
+      };
+      icon.ContextMenuStrip = menu;
+      System.Windows.Forms.Application.Run();
+      icon.Dispose();
+      return 0;
+    }
+  }
+
+  /// For this person only, and theirs to turn on.
+  static bool Starts() {
+    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey)) return key != null && key.GetValue("Praecise Control") != null;
+  }
+  static void Start(bool on) {
+    using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKey)) {
+      if (on) key.SetValue("Praecise Control", "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\"");
+      else key.DeleteValue("Praecise Control", false);
+    }
+  }
+}
+#endif
