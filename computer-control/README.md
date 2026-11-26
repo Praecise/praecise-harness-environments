@@ -482,5 +482,16 @@ record. It does not keep what was read, typed or pictured.
 - **The Firefox and Safari extension's own button was not pressed.** It was tried in a
   real Firefox and a real Chromium with the extension let into every page in advance;
   the press that lets it into one tab cannot be made by a test.
+- **The public route was tried against a stand-in for the account service.** No
+  person has yet signed in and allowed an app through it.
+- **Coding agents were tried with a stand-in.** How Claude Code and Codex are started
+  is taken from their documentation; neither was run through Praecise Control.
+- **The camera and the microphone were tried with FFmpeg's test sources**, not a real
+  camera or microphone.
+- **A person manages their computers from the command line or through an app's own
+  page.** Praecise Control has no web page for it.
+- **A press that waits for a person is approved at the computer.** It cannot be
+  approved from somewhere else.
+- **The capture sign on Windows and Linux compiles and was not looked at.**
 - **No extension is in a store.**
 - **It has not been measured.** The benchmarks to run are listed in FRONTIER.md.
