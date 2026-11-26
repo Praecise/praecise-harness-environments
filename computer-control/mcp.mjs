@@ -166,6 +166,14 @@ p{margin:0;color:${soft}}small{display:block;margin-top:26px;color:${soft};font-
 <main>${mark}<h1>${text(title)}</h1><p>${text(line)}</p>${edition.by ? `<small>${text(edition.by)}</small>` : ""}</main></html>`;
 }
 
+// Started by the app that carries it, it ends when that app does: the app holds the other end of its input, and
+// an app that is quit, killed or started afresh by the system lets go of it.
+if (flag("--with-app") >= 0) {
+  process.stdin.resume();
+  process.stdin.on("end", () => process.exit(0));
+  process.stdin.on("error", () => process.exit(0));
+}
+
 // `--devices` is the person's own list at the relay: their computers, the apps allowed on each, what was asked of each.
 const managing = flag("--devices") >= 0;
 if (flag("--cloud") >= 0 || managing) {

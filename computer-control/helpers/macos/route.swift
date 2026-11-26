@@ -14,6 +14,8 @@ final class Route: @unchecked Sendable {
   private let lock = NSLock()
   private let work = DispatchQueue(label: "route")
   private var child: Process?
+  /// The runtime's input, held open for as long as this app runs. When the app goes, however it goes, the runtime reads its end and stops.
+  private var held: Pipe?
   private var said = ""
   private var listed: [(alias: String, kind: String, mode: String)] = []
 
@@ -171,7 +173,7 @@ final class Route: @unchecked Sendable {
     if lock.withLock({ child?.isRunning == true }) { return }
     let process = Process()
     process.executableURL = node
-    process.arguments = [control.appendingPathComponent("mcp.mjs").path, folder.path, "--cloud", "--first-run", "--edition", edition.path]
+    process.arguments = [control.appendingPathComponent("mcp.mjs").path, folder.path, "--cloud", "--first-run", "--with-app", "--edition", edition.path]
     process.currentDirectoryURL = folder
     var around = ProcessInfo.processInfo.environment
     around["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (around["PATH"] ?? "/usr/bin:/bin")
@@ -179,7 +181,9 @@ final class Route: @unchecked Sendable {
     let heard = Pipe()
     process.standardError = heard
     process.standardOutput = FileHandle.nullDevice
-    process.standardInput = FileHandle.nullDevice
+    let input = Pipe()
+    process.standardInput = input
+    lock.withLock { held = input }
     heard.fileHandleForReading.readabilityHandler = { [weak self] handle in
       let text = String(decoding: handle.availableData, as: UTF8.self)
       guard let self, !text.isEmpty else { return }
