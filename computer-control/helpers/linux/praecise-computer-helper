@@ -730,6 +730,59 @@ def frames(params):
     return {"recording": name, "seconds": round(length, 1), "frames": out}
 
 
+# What is kept, and who is connected
+
+sessions = {}          # connection -> {since, app, last}
+asking = [None]        # the connection whose request is being answered
+
+
+def kept():
+    try:
+        names = os.listdir(RECORDINGS)
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        path = os.path.join(RECORDINGS, name)
+        try:
+            out.append({"name": name, "bytes": os.path.getsize(path), "at": int(os.path.getmtime(path))})
+        except OSError:
+            continue
+    return sorted(out, key=lambda each: -each["at"])
+
+
+def storage(_params):
+    all_kept = kept()
+    return {"folder": RECORDINGS, "bytes": sum(each["bytes"] for each in all_kept), "limit": KEPT_BYTES, "elements": len(refs), "recordings": all_kept}
+
+
+def connected(_params):
+    return [{"since": int(each["since"]), "app": each["app"], "last": int(each["last"])} for each in sorted(sessions.values(), key=lambda one: one["since"])]
+
+
+def clear(params):
+    """Remove what is kept. A recording that is still running is left alone."""
+    what = params.get("what")
+    if what == "recordings":
+        busy = {os.path.basename(each["path"]) for each in recording.values()}
+        removed = 0
+        for each in kept():
+            if each["name"] not in busy:
+                try:
+                    os.remove(os.path.join(RECORDINGS, each["name"]))
+                    removed += 1
+                except OSError:
+                    pass
+        return {"removed": removed}
+    if what == "cache":
+        removed = len(refs)
+        refs.clear()
+        named.clear()
+        pointer.clear()
+        return {"removed": removed}
+    raise Failure("`what` is recordings or cache")
+
+
 def cursor(params):
     x, y = pointer.get(str(params.get("app") or ""), (0, 0))
     return {"x": x, "y": y}
@@ -759,6 +812,7 @@ METHODS = {
     "hello": hello, "apps": apps, "open": open_app, "window": window, "screenshot": screenshot, "read": read, "locate": locate,
     "activate": activate, "fill": fill, "click": click, "move": move, "drag": drag, "scroll": scroll, "type": type_text,
     "key": key, "cursor": cursor, "record_start": record_start, "record_stop": record_stop, "frames": frames,
+    "storage": storage, "sessions": connected, "clear": clear,
 }
 
 paused = False
@@ -784,6 +838,8 @@ def handle(line):
             raise Failure("the accessibility bindings are missing: %s" % ATSPI)
         if params.get("app"):
             last["app"], last["at"] = str(params["app"]), time.time()
+            if asking[0] in sessions:
+                sessions[asking[0]]["app"], sessions[asking[0]]["last"] = last["app"], last["at"]
         answer = {"id": ident, "result": method(params)}
     except Failure as failure:
         answer = {"id": ident, "error": str(failure)}
@@ -868,13 +924,17 @@ def app():
         os.umask(previous)
     listening.listen(8)
 
-    def on_main(line):
+    def on_main(line, joined=None):
         """Everything is asked of the desktop from the one thread that owns the session's connection."""
         done = threading.Event()
         said = []
 
         def run():
-            said.append(handle(line))
+            asking[0] = joined
+            try:
+                said.append(handle(line))
+            finally:
+                asking[0] = None
             done.set()
             return False
 
@@ -883,14 +943,20 @@ def app():
         return said[0]
 
     def each(joined):
-        with joined, joined.makefile("r", encoding="utf-8") as asked:
-            for line in asked:
-                answer = on_main(line)
-                if answer is not None:
-                    try:
-                        joined.sendall((answer + "\n").encode("utf-8"))
-                    except OSError:
-                        return
+        sessions[joined] = {"since": time.time(), "app": "", "last": 0}
+        try:
+            with joined, joined.makefile("r", encoding="utf-8") as asked:
+                for line in asked:
+                    answer = on_main(line, joined)
+                    if answer is not None:
+                        try:
+                            joined.sendall((answer + "\n").encode("utf-8"))
+                        except OSError:
+                            return
+        except OSError:
+            pass
+        finally:
+            sessions.pop(joined, None)
 
     def accept():
         while True:
@@ -901,25 +967,75 @@ def app():
 
     menu = Gtk.Menu()
 
-    def rebuild(*_):
+    def size(count):
+        for unit in ("bytes", "KB", "MB", "GB"):
+            if count < 1024 or unit == "GB":
+                return ("%d %s" if unit == "bytes" else "%.1f %s") % (count, unit)
+            count /= 1024.0
+
+    def ago(when):
+        passed = int(time.time() - when)
+        return "just now" if passed < 60 else "%d min ago" % (passed // 60) if passed < 3600 else "%d h ago" % (passed // 3600)
+
+    def entry(label, press=None):
+        item = Gtk.MenuItem(label=label)
+        if press is None:
+            item.set_sensitive(False)
+        else:
+            item.connect("activate", lambda _item: (press(), rebuild()))
+        menu.append(item)
+
+    def flip():
         global paused
+        paused = not paused
+
+    def disconnect():
+        # Closed from this end. A harness that is still wanted connects again by itself.
+        for joined in list(sessions):
+            try:
+                joined.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def reveal():
+        os.makedirs(RECORDINGS, mode=0o700, exist_ok=True)
+        subprocess.Popen(["xdg-open", RECORDINGS], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def delete():
+        sure = Gtk.MessageDialog(message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.NONE, text="Delete all recordings?")
+        sure.format_secondary_text("They are removed from this computer and cannot be brought back. A recording that is still running is kept.")
+        sure.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        sure.add_button("Delete", Gtk.ResponseType.OK)
+        agreed = sure.run() == Gtk.ResponseType.OK
+        sure.destroy()
+        if agreed:
+            clear({"what": "recordings"})
+
+    def rebuild(*_):
         for item in menu.get_children():
             menu.remove(item)
-        recent = time.time() - last["at"] < 60
-        state = Gtk.MenuItem(label="Paused: agents are refused" if paused else "An agent is using %s" % last["app"] if recent else "No agent is using this computer")
-        state.set_sensitive(False)
-        toggle = Gtk.MenuItem(label="Resume" if paused else "Pause")
+        joined = sorted(sessions.values(), key=lambda one: one["since"])
+        all_kept = kept()
 
-        def flip(_item):
-            global paused
-            paused = not paused
-            rebuild()
+        # Who is connected.
+        entry("Paused: agents are refused" if paused else "No agent is connected" if not joined else "1 agent is connected" if len(joined) == 1 else "%d agents are connected" % len(joined))
+        for each_one in joined:
+            entry("    %s, connected %s" % ("using %s, %s" % (each_one["app"], ago(each_one["last"])) if each_one["app"] else "has not used an app yet", ago(each_one["since"])))
+        entry("Resume" if paused else "Pause", flip)
+        if joined:
+            entry("Disconnect All", disconnect)
+        menu.append(Gtk.SeparatorMenuItem())
 
-        toggle.connect("activate", flip)
-        leave = Gtk.MenuItem(label="Quit Praecise Control")
-        leave.connect("activate", lambda _item: Gtk.main_quit())
-        for item in (state, toggle, Gtk.SeparatorMenuItem(), leave):
-            menu.append(item)
+        # What is kept.
+        entry("No recordings are kept" if not all_kept else "%d recording%s kept, %s of %s allowed" % (len(all_kept), "" if len(all_kept) == 1 else "s", size(sum(one["bytes"] for one in all_kept)), size(KEPT_BYTES)))
+        if all_kept:
+            entry("Show Recordings", reveal)
+            entry("Delete All Recordings…", delete)
+        entry("Nothing is remembered of any window" if not refs else "%d thing%s remembered from windows" % (len(refs), "" if len(refs) == 1 else "s"))
+        if refs:
+            entry("Clear Cache", lambda: clear({"what": "cache"}))
+        menu.append(Gtk.SeparatorMenuItem())
+        entry("Quit Praecise Control", Gtk.main_quit)
         menu.show_all()
 
     rebuild()

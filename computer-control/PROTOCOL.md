@@ -69,5 +69,14 @@ A helper that lists `record` in `can` also answers:
 Recordings are kept in one folder of the helper's own, for a day and within a size
 limit, the oldest removed first. A helper that cannot keep within that refuses to start.
 
+What a person sees in the app's menu, a helper also answers, for a program at their own
+terminal. The environment does not offer these to an agent.
+
+| Method | Params | Result |
+|---|---|---|
+| `storage` | | `{ folder, bytes, limit, elements, recordings: [{ name, bytes, at }] }`: what is kept on disk, and how many things are remembered from windows. |
+| `sessions` | | `[{ since, app, last }]`: the programs connected to the app now, with the app each last asked about. |
+| `clear` | `what`: `recordings` or `cache` | `{ removed }`. A recording that is still running is left. |
+
 `states` are words from: `disabled`, `focused`, `checked`, `partly checked`, `pressed`,
 `expanded`, `collapsed`, `selected`, `required`, `invalid`.
