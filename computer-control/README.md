@@ -15,6 +15,7 @@ Not released. See [What is not done](#what-is-not-done).
 | `computer_control_elements` | Read a window as elements, find by words, and click, hover, fill and scroll to an element by reference. Each answer says what appeared, went or changed. |
 | `computer_control_screen` | A screenshot of the window, zoom, and a pointer and keys by position. |
 | `computer_control_open` | Start an app or bring up its window. |
+| `computer_control_record` | Record a window as video, and take pictures from a recording. Linux on X11 only, so far. |
 
 One skill, `use-an-app`, and one agent, `app-operator`.
 
@@ -176,6 +177,23 @@ an app from the Store that is shown inside another process's frame is not.
 Tried against a Windows Forms app in the signed-in session with
 `tests/fixtures/windows-check.ps1`: 28 checks.
 
+## Recording
+
+`computer_control_record` records one app's window as video and gives back pictures
+taken from a recording, spread evenly through it. Watching is reading: it needs no more
+than the app being listed.
+
+Recordings stay on the machine, in one folder of the helper's own that only the person
+can open. They are kept for a day and within a size limit (2 GB unless
+`PRAECISE_CONTROL_RECORDINGS_BYTES` says otherwise), the oldest removed first, and a
+recording stops by itself at the length it was started with, at most ten minutes.
+
+| | Recording |
+|---|---|
+| Linux | X11, through FFmpeg, which has to be installed. Sound from the machine with `audio: true`. Tried through the whole environment: start, a second start refused, stop, three pictures. Sound was not tried |
+| macOS | Not written. ScreenCaptureKit records a window and what the machine plays; it needs a build on a Mac |
+| Windows | Not written. Windows' own capture is not reachable from the compiler that is part of Windows, and FFmpeg is not something to ask every person to install |
+
 ## The browser a person is signed in to
 
 [browser/extension](browser/extension/) is the Praecise Control extension for Chrome and
@@ -267,9 +285,19 @@ handshake. Claude Code 2.1.332, the latest on the day, was refused by `praecise 
 and connected through `mcp.mjs`. `mcp.mjs` answers the handshake and passes each
 request to the app unchanged; the harness is as it was.
 
-A press that needs a person is refused over MCP with a line saying so. The client's own
-question before a tool call is a person agreeing, but the environment does not hear
-it, so today such a press is allowed for an app only by waiving it for that app.
+A press that needs a person is refused over MCP with a line saying so. The harness does
+not take an approval over MCP, on purpose: a message from a client must not be what
+approves something. Where the client itself asks its person before each tool call, an
+app's sending and publishing can be waived for that app, by a person:
+
+```sh
+npx praecise computer-control waive textedit publish send
+npx praecise computer-control waive textedit none
+```
+
+Removing and paying cannot be waived, and once a window has been read in a conversation
+everything that commits waits for a person whatever is waived. `waive` needs a harness
+later than 1.2.1.
 
 ## What is not done
 
