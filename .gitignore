@@ -11,3 +11,4 @@ computer-control/helpers/windows/praecise-computer-helper.exe
 __pycache__/
 xcuserdata/
 *.xcuserstate
+computer-control/browser/safari/build/
