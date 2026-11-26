@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Praecise Control",
+  "version": "0.1.0",
+  "description": "Lets an agent on this machine work the tab you offer it, on the site it is on, until you stop it.",
+  "icons": { "16": "icons/mark-16.png", "32": "icons/mark-32.png", "48": "icons/mark-48.png", "128": "icons/mark-128.png" },
+  "permissions": ["activeTab", "scripting"],
+  "background": { "scripts": ["background.js"], "service_worker": "background.js" },
+  "action": { "default_title": "Praecise Control", "default_popup": "popup.html", "default_icon": { "16": "icons/mark-16.png", "32": "icons/mark-32.png" } },
+  "browser_specific_settings": {
+    "gecko": { "id": "control@praecise.com", "strict_min_version": "128.0", "data_collection_permissions": { "required": ["websiteContent"] } }
+  }
+}
