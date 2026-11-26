@@ -436,7 +436,17 @@ static class Helper {
     if (!element.Current.IsEnabled) throw new Failure(reference + " is disabled");
     object pattern;
     try {
-      if (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) { ((InvokePattern)pattern).Invoke(); return null; }
+      if (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) {
+        // Some apps do not come back from this until what the press started has finished, which for a box that
+        // asks a question is when a person answers it. The press is made on its own thread and given a moment.
+        var pressing = (InvokePattern)pattern;
+        Exception refused = null;
+        var press = new Thread(() => { try { pressing.Invoke(); } catch (Exception err) { refused = err; } });
+        press.IsBackground = true;
+        press.Start();
+        if (press.Join(3000) && refused != null) throw new Failure(reference + " could not be pressed: " + refused.Message);
+        return null;
+      }
       if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) { ((TogglePattern)pattern).Toggle(); return null; }
       if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)) { ((SelectionItemPattern)pattern).Select(); return null; }
       if (element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern)) {
@@ -737,7 +747,7 @@ static class Helper {
         if (Paused && method != "hello") throw new Failure("Praecise Control is paused by the person at this machine");
         var app = Text(given, "app");
         if (!string.IsNullOrEmpty(app)) { LastApp = app; LastAsked = DateTime.Now; }
-        answer["result"] = Answer(method, given);
+        answer["result"] = Within(method, given);
       } catch (Failure failure) {
         answer["error"] = failure.Message;
       } catch (ElementNotAvailableException) {
@@ -747,6 +757,29 @@ static class Helper {
       }
       return Json.Serialize(answer);
     }
+  }
+
+  /// The longest one request may take. An app that is busy, or showing a box that has to be answered, can hold
+  /// a question for as long as it likes; the helper is not held with it.
+  const int PATIENCE = 20000;
+
+  /// Answer on a thread of its own and wait only so long. One that has not come back is left behind: whatever it
+  /// asked of the app has been asked, and the next request is not kept waiting behind it.
+  static object Within(string method, Dictionary<string, object> given) {
+    object result = null;
+    Exception thrown = null;
+    var asking = new Thread(() => {
+      try { result = Answer(method, given); } catch (Exception err) { thrown = err; }
+    });
+    asking.IsBackground = true;
+    asking.Start();
+    if (!asking.Join(PATIENCE)) {
+      throw new Failure("the app did not answer " + method + " in " + (PATIENCE / 1000) + " seconds; it may be busy, or waiting for a box on its screen to be answered");
+    }
+    if (thrown is Failure) throw new Failure(thrown.Message);
+    if (thrown is ElementNotAvailableException) throw new ElementNotAvailableException();
+    if (thrown != null) throw new Failure(thrown.GetType().Name + ": " + thrown.Message);
+    return result;
   }
 
   static void Lines(Stream from, Stream to) {
