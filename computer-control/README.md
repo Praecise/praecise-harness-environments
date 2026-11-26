@@ -15,7 +15,7 @@ Not released. See [What is not done](#what-is-not-done).
 | `computer_control_elements` | Read a window as elements, find by words, and click, hover, fill and scroll to an element by reference. Each answer says what appeared, went or changed. |
 | `computer_control_screen` | A screenshot of the window, zoom, and a pointer and keys by position. |
 | `computer_control_open` | Start an app or bring up its window. |
-| `computer_control_record` | Record a window as video, and take pictures from a recording. Linux on X11 only, so far. |
+| `computer_control_record` | Record a window as video, and take pictures from a recording. macOS, and Linux on X11. |
 
 One skill, `use-an-app`, and one agent, `app-operator`.
 
@@ -130,7 +130,8 @@ SIGN="Developer ID Application: Name (TEAM)" NOTARY_PROFILE=profile \\
   computer-control/helpers/macos/build-app.sh /Applications
 ```
 
-It builds for both kinds of Mac with one compiler job each at the lowest priority. It
+It builds for both kinds of Mac, in Swift 6, with one compiler job each at the lowest
+priority. It
 is distributed outside the Mac App Store, signed with a Developer ID and notarized: an
 app that works other apps through the Accessibility API cannot be sandboxed. It needs
 Accessibility and Screen Recording, which the person allows from its menu. They are
@@ -191,7 +192,7 @@ recording stops by itself at the length it was started with, at most ten minutes
 | | Recording |
 |---|---|
 | Linux | X11, through FFmpeg, which has to be installed. Sound from the machine with `audio: true`. Tried through the whole environment: start, a second start refused, stop, three pictures. Sound was not tried |
-| macOS | Not written. ScreenCaptureKit records a window and what the machine plays; it needs a build on a Mac |
+| macOS | ScreenCaptureKit, written by the system's own encoder; nothing to install. Sound from the app with `audio: true`. Tried against a window: start, a second start refused, stop, three pictures. Sound was not tried, and it was not tried through the environment |
 | Windows | Not written. Windows' own capture is not reachable from the compiler that is part of Windows, and FFmpeg is not something to ask every person to install |
 
 ## The browser a person is signed in to
@@ -312,8 +313,9 @@ later than 1.2.1.
   Windows and Linux it was, through each app.
 - **It needs a harness later than 1.2.1**, for `elements()` and for an action whose
   kind depends on the call. Both are on the harness's main branch and not on npm.
-- **The Safari app is not built.** Its project is in `browser/safari`, made by Apple's
-  converter from `browser/extension-page`. The Mac was too busy to build it.
+- **The Safari app is built and signed, and has not been run in Safari.** Its project is
+  in `browser/safari`, made by Apple's converter from `browser/extension-page`, and
+  `browser/safari/build.sh` builds it. Turning it on in Safari is a person's to do.
 - **The Firefox and Safari extension's own button was not pressed.** It was tried in a
   real Firefox and a real Chromium with the extension let into every page in advance;
   the press that lets it into one tab cannot be made by a test.

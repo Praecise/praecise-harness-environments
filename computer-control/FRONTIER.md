@@ -168,10 +168,13 @@ Where that stands:
    whole environment was run through it from another machine over SSH.
 3. The Linux app: built, with a relay that starts it. The whole environment was run
    through it in a session of its own. Its icon was not seen: there was no panel.
-4. Safari and Firefox extensions: not started. They cannot rest on a debugger and need
-   reading and acting from a content script, which is weaker than the browser's own
-   input and has to be measured before it is offered.
-5. Store listings, installers and icons: not started.
+4. Firefox and Safari: one extension, `browser/extension-page`, that reads and works the
+   page from inside it. Tried in a real Firefox and a real Chromium. For Safari it is
+   wrapped in a small Mac app by Apple's converter, built and signed, and not yet run
+   in Safari.
+5. Icons are drawn from the Praecise mark. Store listings and installers: not started.
+6. For Claude Code, Codex and other MCP clients: `mcp.mjs`. Claude Code connects; the others are documented from their own pages and not tried.
+7. Recording a window and taking pictures from a recording: macOS and Linux on X11. Windows not written.
 
 Before any of these is submitted, read the store's current policy text itself. The
 table above is not enough to submit on.
