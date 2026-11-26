@@ -204,7 +204,11 @@ if (flag("--cloud") >= 0 || managing) {
       const about = await (await fetch(`${address}/.well-known/oauth-protected-resource`)).json();
       const issuer = String(about.authorization_servers?.[0] ?? "").replace(/\/+$/, "");
       return (await fetch(`${issuer}/.well-known/openid-configuration`)).json();
-    })());
+    })().catch((err) => {
+      // A lookup that failed is made again the next time, not remembered as the answer.
+      known = undefined;
+      throw err;
+    }));
 
   const exchange = async (form) => {
     const account = await accountService();
