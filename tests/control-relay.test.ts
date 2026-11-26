@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,7 +60,7 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
 
   const data = mkdtempSync(join(tmpdir(), "control-relay-test-"));
   t.after(() => rmSync(data, { recursive: true, force: true }));
-  await started(process.execPath, [RELAY], { CONTROL_ADDRESS: address, CONTROL_ISSUER: issuer, CONTROL_CLAIMS_HOOK_SECRET: SECRET, CONTROL_DATA: data, PORT: String(port) }, "praecise-control-relay");
+  await started(process.execPath, [RELAY], { CONTROL_ADDRESS: address, CONTROL_ISSUER: issuer, CONTROL_CLAIMS_HOOK_SECRET: SECRET, CONTROL_DATA: data, CONTROL_DOWNLOADS_BY_APP: JSON.stringify({ "https://app.example/client.json": "https://app.example/get-control" }), PORT: String(port) }, "praecise-control-relay");
 
   /** An answer whose body is read once, and which says what was asked when there is nothing in it. */
   const answered = async (response: Response, asked: unknown) => {
@@ -107,8 +107,15 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   assert.equal((await hook({ account: null, scopes: ["control:use"], resource: address, requested: {} })).said.error, "access_denied");
 
   // Alice's computer connects itself, with a token of her own.
-  const computer = await started(process.execPath, [FRONT, APP!, "--cloud", address], { PRAECISE_CONTROL_CLOUD_TOKEN: token({ sub: "alice", scope: "control:host" }) }, "this computer is reachable");
+  // It is an edition made for one app, on its first run: once connected it goes on to the app it is made for, with this computer named.
+  rmSync(`${APP}/.praecise/control-allowed-example`, { force: true });
+  const opened1 = join(data, "opened.txt");
+  const opener = join(data, "open.sh");
+  writeFileSync(opener, `#!/bin/sh\nprintf '%s' "$1" > "${opened1}"\n`, { mode: 0o755 });
+  const computer = await started(process.execPath, [FRONT, APP!, "--cloud", address, "--first-run", "--edition", fileURLToPath(new URL("./fixtures/edition-example.json", import.meta.url))], { PRAECISE_CONTROL_CLOUD_TOKEN: token({ sub: "alice", scope: "control:host" }), PRAECISE_CONTROL_OPEN: opener }, "this computer is reachable");
   const machine = readFileSync(`${APP}/.praecise/control-machine`, "utf8").trim();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(readFileSync(opened1, "utf8"), `https://app.example/devices/connect?device=${encodeURIComponent(machine)}`);
 
   // On the consent page she is shown her computers and picks one; that choice goes in the assistant's token.
   const choices = (await hook({ account: alice, scopes: ["control:use"], resource: address, requested: {} })).said.choices as { label: string; requested: { control_machine: string } }[];
@@ -196,7 +203,10 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   };
   await mcp(sees, call(36, "computer_control_elements", { app: "mail", action: "find", query: "send" }));
   const seen = (await get(sees, "/devices")).said.devices as Record<string, any>[];
-  assert.deepEqual([seen.length, seen[0]!.id, seen[0]!.connected, seen[0]!.allowed, seen[0]!.in_use], [1, machine, true, ["screen"], true]);
+  assert.deepEqual([seen.length, seen[0]!.id, seen[0]!.connected, seen[0]!.allowed, seen[0]!.in_use, seen[0]!.edition], [1, machine, true, ["screen"], true, "example"]);
+  // An app with an edition of its own is told where that is got; any other, where Praecise Control is.
+  assert.equal((await get(sees, "/devices")).said.get, "https://app.example/get-control");
+  assert.equal((await get(token({ sub: "alice", scope: "control:devices" }), "/devices")).said.get, "https://control.praecise.com/#download");
   assert.equal((await get(sees, `/devices/${machine}`, "PATCH", { name: "Not hers to name" })).status, 403);
   assert.equal((await get(token({ sub: "bob", scope: "control:devices" }), "/devices")).said.devices.length, 0);
   const manages = token({ sub: "alice", scope: "control:manage" });

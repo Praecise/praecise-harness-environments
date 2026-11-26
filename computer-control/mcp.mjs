@@ -6,6 +6,9 @@
 //   node mcp.mjs [folder] --devices [list | name <computer> <new name> | pause|resume|remove|restore <computer>
 //                          | withdraw|allow <computer> <app> | only <computer> <app> screen,act | activity <computer>]
 //                                          the person's own list of computers at the relay, and the apps allowed on each
+//   node mcp.mjs [folder] --cloud --first-run --edition <name or file>
+//                                          as an edition (see editions/): under its name, and the first time on
+//                                          to the app it is made for, where the person allows that app here
 //   node mcp.mjs [folder] --cloud [address]
 //                                          connect this computer to Praecise Control's public route, for an
 //                                          assistant that calls from somewhere else (https://praecise-control.app.praecise.cloud unless said)
@@ -52,7 +55,7 @@ import { App, PROTOCOL_VERSION, fileVault, handleMcp, keychainVault, secretCiphe
 const VERSION = "io.modelcontextprotocol/protocolVersion";
 const args = process.argv.slice(2);
 const flag = (name) => args.indexOf(name);
-const given = args.find((each, at) => !each.startsWith("--") && !["--http", "--tools", "--call", "--cloud"].includes(args[at - 1]) && !(args[at - 2] === "--call") && (args.indexOf("--devices") < 0 || at < args.indexOf("--devices")));
+const given = args.find((each, at) => !each.startsWith("--") && !["--http", "--tools", "--call", "--cloud", "--edition"].includes(args[at - 1]) && !(args[at - 2] === "--call") && (args.indexOf("--devices") < 0 || at < args.indexOf("--devices")));
 const root = resolve(given ?? resolve(dirname(fileURLToPath(import.meta.url)), "app"));
 
 const app = await App.load({ root });
@@ -130,11 +133,20 @@ if (flag("--call") >= 0) {
   process.exit(result.isError ? 1 : 0);
 }
 
+// The edition: the same program under the name an edition's file gives it, connecting to the app that file names.
+const edition = (() => {
+  const id = flag("--edition") >= 0 ? args[flag("--edition") + 1] : (process.env.PRAECISE_CONTROL_EDITION ?? "praecise");
+  // One of those in editions/, by name, or a file of its own that is kept elsewhere.
+  if (/[\\/]|\.json$/.test(String(id))) return JSON.parse(readFileSync(id, "utf8"));
+  if (!/^[a-z0-9-]{1,24}$/.test(String(id))) throw new Error("an edition is named in small letters, or is a file");
+  return JSON.parse(readFileSync(new URL(`./editions/${id}.json`, import.meta.url), "utf8"));
+})();
+
 // `--devices` is the person's own list at the relay: their computers, the apps allowed on each, what was asked of each.
 const managing = flag("--devices") >= 0;
 if (flag("--cloud") >= 0 || managing) {
   const said = flag("--cloud") >= 0 ? args[flag("--cloud") + 1] : undefined;
-  const address = (said && /^https?:\/\//.test(said) ? said : "https://praecise-control.app.praecise.cloud").replace(/\/+$/, "");
+  const address = (said && /^https?:\/\//.test(said) ? said : edition.relay).replace(/\/+$/, "");
   const state = join(root, ".praecise");
   mkdirSync(state, { recursive: true });
   // This computer's own name for itself at the relay, made once.
@@ -145,11 +157,16 @@ if (flag("--cloud") >= 0 || managing) {
   const vault = process.env.PRAECISE_VAULT_KEY
     ? fileVault(state, secretCipher(process.env.PRAECISE_VAULT_KEY))
     : process.platform === "darwin"
-      ? keychainVault("praecise.computer-control-cloud")
+      ? keychainVault(edition.id === "praecise" ? "praecise.computer-control-cloud" : `praecise.${edition.id}-control-cloud`)
       : (() => {
           throw new Error("there is nowhere safe to keep the sign-in: set PRAECISE_VAULT_KEY");
         })();
-  const note = (text) => process.stderr.write(`praecise-control: ${text}\n`);
+  const note = (text) => process.stderr.write(`${edition.executable}: ${text}\n`);
+  /** Opens an address in the person's own browser. */
+  const show = (href) => {
+    if (process.env.PRAECISE_CONTROL_OPEN) return execFile(process.env.PRAECISE_CONTROL_OPEN, [href], () => undefined);
+    execFile(process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open", [href], () => undefined);
+  };
 
   const client = `${address}/oauth/client.json`;
   // Connecting this computer and managing the list are two sign-ins, each asked for by name and kept apart.
@@ -184,7 +201,7 @@ if (flag("--cloud") >= 0 || managing) {
       const back = createServer((request, response) => {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         if (url.pathname !== "/callback") return response.writeHead(404).end();
-        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(url.searchParams.get("code") ? "Signed in to Praecise Control. You can close this page." : "Praecise Control was not signed in to.");
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(url.searchParams.get("code") ? `Signed in to ${edition.name}. You can close this page.` : `${edition.name} was not signed in to.`);
         back.close();
         if (url.searchParams.get("state") !== state || !url.searchParams.get("code")) return failed(new Error(url.searchParams.get("error_description") ?? "the sign-in was not finished"));
         exchange({ grant_type: "authorization_code", code: url.searchParams.get("code"), code_verifier: verifier, redirect_uri: `http://127.0.0.1:${back.address().port}/callback` }).then(done, failed);
@@ -193,8 +210,7 @@ if (flag("--cloud") >= 0 || managing) {
         const page = new URL(account.authorization_endpoint);
         for (const [key, value] of Object.entries({ response_type: "code", client_id: client, redirect_uri: `http://127.0.0.1:${back.address().port}/callback`, scope: asks, resource: address, state, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) page.searchParams.set(key, value);
         note(`sign in to ${managing ? "manage your computers" : "connect this computer"}: ${page.href}`);
-        const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
-        execFile(opener, [page.href], () => undefined);
+        show(page.href);
       });
     });
   };
@@ -275,7 +291,7 @@ if (flag("--cloud") >= 0 || managing) {
       // The token first: signing in can take a person a while, and the line is opened once there is something to say on it.
       const mine = await token();
       socket = new WebSocket(`${address.replace(/^http/, "ws")}/host`);
-      socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "hello", token: mine, machine, name: hostname(), system: { darwin: "macos", win32: "windows", linux: "linux" }[process.platform] ?? "unknown" })));
+      socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "hello", token: mine, machine, name: hostname(), edition: edition.id, system: { darwin: "macos", win32: "windows", linux: "linux" }[process.platform] ?? "unknown" })));
     } catch (err) {
       note(`could not connect: ${err.message}`);
       return setTimeout(connect, (wait = Math.min(wait * 2, 60_000)));
@@ -284,7 +300,15 @@ if (flag("--cloud") >= 0 || managing) {
       const message = JSON.parse(String(event.data));
       if (message.type === "welcome") {
         wait = 1000;
-        return note(`this computer is reachable through ${address}/mcp by assistants its person allows`);
+        note(`this computer is reachable through ${address}/mcp by assistants its person allows`);
+        // The first time, an edition made for one app goes on to that app, where its person allows it on this computer.
+        const allowed = join(state, `control-allowed-${edition.id}`);
+        if (flag("--first-run") >= 0 && edition.connect?.url && !existsSync(allowed)) {
+          writeFileSync(allowed, new Date().toISOString());
+          note(edition.wording.allow ?? `now allow ${edition.connect.name} on this computer`);
+          show(edition.connect.url.replace("{device}", encodeURIComponent(machine)));
+        } else if (flag("--first-run") >= 0) note(edition.wording.done);
+        return undefined;
       }
       if (message.type === "refused") return note(`the relay refused this computer: ${message.reason}`);
       if (typeof message.id !== "number") return;

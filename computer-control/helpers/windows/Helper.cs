@@ -34,6 +34,15 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Automation;
 
+#if !EDITION
+/// What this program is called. An edition under another name is built with a file of its own that says so.
+static class Edition {
+  public static readonly string Name = "Praecise Control";
+  public static readonly string Slug = "praecise-control";
+  public static readonly string By = "";
+}
+#endif
+
 class Failure : Exception {
   public Failure(string message) : base(message) { }
 }
@@ -826,7 +835,7 @@ static class Helper {
 
   // Recording: pictures of the window, taken the way one picture is, written one after another as a video
 
-  public static readonly string Recordings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Praecise Control", "recordings");
+  public static readonly string Recordings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Edition.Name, "recordings");
   /// What recordings may take up together, and how long one is kept. Older ones go first.
   public static readonly long KeptBytes = ReadLimit();
   const double KeptSeconds = 24 * 3600;
@@ -1032,7 +1041,7 @@ static class Helper {
       try {
         var method = Text(asked, "method") ?? "";
         var given = Part(asked, "params") ?? new Dictionary<string, object>();
-        if (Paused && method != "hello") throw new Failure("Praecise Control is paused by the person at this machine");
+        if (Paused && method != "hello") throw new Failure(Edition.Name + " is paused by the person at this machine");
         var app = Text(given, "app");
         if (!string.IsNullOrEmpty(app)) {
           LastApp = app; LastAsked = DateTime.Now;
@@ -1084,7 +1093,7 @@ static class Helper {
   }
 
   /// The pipe is this person's: its name carries theirs, and only their programs can open it.
-  public static string Pipe { get { return "praecise-control-" + Environment.UserName.ToLowerInvariant(); } }
+  public static string Pipe { get { return Edition.Slug + "-" + Environment.UserName.ToLowerInvariant(); } }
 
   public static void Serve() {
     var listening = new Thread(() => {
@@ -1117,7 +1126,7 @@ static class Helper {
     try {
       pipe.Connect(3000);
     } catch (Exception) {
-      Console.Error.WriteLine("Praecise Control is not running in the signed-in session; start it there");
+      Console.Error.WriteLine(Edition.Name + " is not running in the signed-in session; start it there");
       return 69;
     }
     var back = new Thread(() => {
@@ -1160,11 +1169,11 @@ static class Tray {
 
   public static int Run() {
     bool first;
-    using (var only = new Mutex(true, "praecise-control-" + Environment.UserName.ToLowerInvariant(), out first)) {
+    using (var only = new Mutex(true, Edition.Slug + "-" + Environment.UserName.ToLowerInvariant(), out first)) {
       if (!first) return 0;
       Helper.Serve();
       System.Windows.Forms.Application.EnableVisualStyles();
-      var icon = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location), Text = "Praecise Control", Visible = true };
+      var icon = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location), Text = Edition.Name, Visible = true };
       // Red while a window is being recorded or pictured, so it is never done unseen.
       var usual = icon.Icon;
       System.Drawing.Icon red;
@@ -1179,7 +1188,7 @@ static class Tray {
         if (now == shown) return;
         shown = now;
         icon.Icon = now ? red : usual;
-        icon.Text = now ? "Praecise Control is capturing a window" : Helper.Paused ? "Praecise Control, paused" : "Praecise Control";
+        icon.Text = now ? Edition.Name + " is capturing a window" : Helper.Paused ? Edition.Name + ", paused" : Edition.Name;
       };
       sign.Start();
       // The system's own menu, drawn by whichever Windows this is in the way that Windows draws menus.
@@ -1200,7 +1209,7 @@ static class Tray {
         if (Helper.Capturing) say("Capturing a window now");
         say(Helper.Paused ? "Paused: agents are refused" : joined.Count == 0 ? "No agent is connected" : joined.Count == 1 ? "1 agent is connected" : joined.Count + " agents are connected");
         foreach (var each in joined) say("    " + (each.App == "" ? "has not used an app yet" : "using " + each.App + ", " + Ago(each.Last)) + ", connected " + Ago(each.Since));
-        offer(Helper.Paused ? "Resume" : "Pause", () => { Helper.Paused = !Helper.Paused; icon.Text = Helper.Paused ? "Praecise Control, paused" : "Praecise Control"; });
+        offer(Helper.Paused ? "Resume" : "Pause", () => { Helper.Paused = !Helper.Paused; icon.Text = Helper.Paused ? Edition.Name + ", paused" : Edition.Name; });
         // Closed from this end. A harness that is still wanted connects again by itself.
         if (joined.Count > 0) offer("Disconnect All", () => { foreach (var each in joined) { try { each.Line.Dispose(); } catch (Exception) { } } });
         line();
@@ -1222,7 +1231,8 @@ static class Tray {
 
         menu.MenuItems.Add(new System.Windows.Forms.MenuItem("Start when I sign in", delegate { Start(!Starts()); }) { Checked = Starts() });
         line();
-        offer("Quit Praecise Control", () => { icon.Visible = false; System.Windows.Forms.Application.Exit(); });
+        if (Edition.By != "") say(Edition.By);
+        offer("Quit " + Edition.Name, () => { icon.Visible = false; System.Windows.Forms.Application.Exit(); });
       };
       icon.ContextMenu = menu;
       System.Windows.Forms.Application.Run();
@@ -1239,7 +1249,7 @@ static class Tray {
     try {
       int pressed;
       // OK and Cancel, with the warning sign.
-      if (TaskDialog(IntPtr.Zero, IntPtr.Zero, "Praecise Control", heading, body, 0x0001 | 0x0008, new IntPtr(0xFFFF), out pressed) == 0) return pressed == 1;
+      if (TaskDialog(IntPtr.Zero, IntPtr.Zero, Edition.Name, heading, body, 0x0001 | 0x0008, new IntPtr(0xFFFF), out pressed) == 0) return pressed == 1;
     } catch (EntryPointNotFoundException) {
     } catch (DllNotFoundException) {
     }
@@ -1256,12 +1266,12 @@ static class Tray {
 
   /// For this person only, and theirs to turn on.
   static bool Starts() {
-    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey)) return key != null && key.GetValue("Praecise Control") != null;
+    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey)) return key != null && key.GetValue(Edition.Name) != null;
   }
   static void Start(bool on) {
     using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKey)) {
-      if (on) key.SetValue("Praecise Control", "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\"");
-      else key.DeleteValue("Praecise Control", false);
+      if (on) key.SetValue(Edition.Name, "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\"");
+      else key.DeleteValue(Edition.Name, false);
     }
   }
 }

@@ -352,7 +352,12 @@ func screenshot(_ params: [String: Any]) throws -> Any {
 
 // MARK: Recording
 
-let RECORDINGS = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Praecise Control/recordings")
+/// What this program is called. An edition under another name is the same program with another Info.plist.
+let NAME = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Praecise Control"
+/// A line saying whose it is, for an edition that carries another name.
+let BY = Bundle.main.object(forInfoDictionaryKey: "PraeciseControlBy") as? String
+
+let RECORDINGS = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/\(NAME)/recordings")
 /// What recordings may take up together, and how long one is kept. Older ones go first.
 let KEPT_BYTES = Int(ProcessInfo.processInfo.environment["PRAECISE_CONTROL_RECORDINGS_BYTES"] ?? "") ?? 2 * 1024 * 1024 * 1024
 let KEPT_SECONDS: TimeInterval = 24 * 3600
@@ -832,7 +837,7 @@ func handle(_ line: String) -> String? {
   let params = asked["params"] as? [String: Any] ?? [:]
   var answered: [String: Any] = ["id": id]
   do {
-    if paused, method != "hello" { throw Failure(message: "Praecise Control is paused by the person at this machine") }
+    if paused, method != "hello" { throw Failure(message: "\(NAME) is paused by the person at this machine") }
     if let app = params["app"] as? String, !app.isEmpty {
       lastApp = running(app)?.localizedName ?? app
       lastAsked = Date()
@@ -860,7 +865,7 @@ func stdio() {
 
 // MARK: The socket between the app and whatever connects to it
 
-let SUPPORT = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Praecise Control")
+let SUPPORT = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/\(NAME)")
 let SOCKET = SUPPORT.appendingPathComponent("control.sock").path
 
 func address() -> sockaddr_un {
@@ -913,13 +918,13 @@ let work = DispatchQueue(label: "com.praecise.control.work")
 
 func serve() throws {
   try FileManager.default.createDirectory(at: SUPPORT, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-  if let already = dial() { close(already); throw Failure(message: "Praecise Control is already running") }
+  if let already = dial() { close(already); throw Failure(message: "\(NAME) is already running") }
   unlink(SOCKET)
   let listening = socket(AF_UNIX, SOCK_STREAM, 0)
   var at = address()
   let bound = withUnsafePointer(to: &at) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listening, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
   // Only this user can open it.
-  guard listening >= 0, bound == 0, chmod(SOCKET, 0o600) == 0, listen(listening, 8) == 0 else { throw Failure(message: "Praecise Control could not listen at \(SOCKET)") }
+  guard listening >= 0, bound == 0, chmod(SOCKET, 0o600) == 0, listen(listening, 8) == 0 else { throw Failure(message: "\(NAME) could not listen at \(SOCKET)") }
   Thread.detachNewThread {
     while true {
       let joined = accept(listening, nil, nil)
@@ -957,7 +962,7 @@ func relay() -> Never {
     }
   }
   guard let to = joined else {
-    FileHandle.standardError.write(Data("Praecise Control is not running; open it from Applications\n".utf8))
+    FileHandle.standardError.write(Data("\(NAME) is not running; open it from Applications\n".utf8))
     exit(69)
   }
   let answered = DispatchSemaphore(value: 0)
@@ -995,7 +1000,10 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   /// The Praecise mark in one colour, which the menu bar tints for itself: a square, its left half open.
   func picture() {
-    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+    // An edition brings its own mark, in one colour; without one it is the Praecise mark, drawn here.
+    let own = Bundle.main.url(forResource: "menubar", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+    own?.size = NSSize(width: 18, height: 18)
+    let image = own ?? NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
       let box = NSRect(x: 2, y: 2, width: 14, height: 14)
       NSColor.black.setFill()
       box.fill()
@@ -1004,11 +1012,11 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return true
     }
     image.isTemplate = true
-    image.accessibilityDescription = paused ? "Praecise Control, paused" : capturing ? "Praecise Control, capturing a window" : "Praecise Control"
+    image.accessibilityDescription = paused ? "\(NAME), paused" : capturing ? "\(NAME), capturing a window" : "\(NAME)"
     item.button?.image = image
     // Red while a window is being recorded or pictured, so it is never done unseen.
     item.button?.contentTintColor = capturing ? .systemRed : nil
-    item.button?.toolTip = capturing ? "Praecise Control is capturing a window" : "Praecise Control"
+    item.button?.toolTip = capturing ? "\(NAME) is capturing a window" : "\(NAME)"
     // Dimmed while it is paused.
     item.button?.appearsDisabled = paused
   }
@@ -1063,7 +1071,8 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     add(AXIsProcessTrusted() ? "Accessibility: allowed" : "Allow Accessibility…", AXIsProcessTrusted() ? nil : #selector(accessibility), to: menu, symbol: AXIsProcessTrusted() ? "checkmark.circle" : "accessibility")
     add(CGPreflightScreenCaptureAccess() ? "Screen Recording: allowed" : "Allow Screen Recording…", CGPreflightScreenCaptureAccess() ? nil : #selector(recording), to: menu, symbol: CGPreflightScreenCaptureAccess() ? "checkmark.circle" : "record.circle")
     menu.addItem(.separator())
-    add("Quit Praecise Control", #selector(quit), to: menu, symbol: "power")
+    if let by = BY { add(by, nil, to: menu) }
+    add("Quit \(NAME)", #selector(quit), to: menu, symbol: "power")
   }
 
   @objc func pause() {

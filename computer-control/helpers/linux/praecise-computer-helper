@@ -33,6 +33,17 @@ import threading
 import time
 import warnings
 
+# What this program is called. An edition under another name has a file beside it that says so.
+HERE = os.path.dirname(os.path.abspath(__file__))
+try:
+    with open(os.path.join(HERE, "edition.json")) as _said:
+        EDITION = json.load(_said)
+except (OSError, ValueError):
+    EDITION = {}
+NAME = EDITION.get("name") or "Praecise Control"
+SLUG = EDITION.get("slug") or "praecise-control"
+BY = EDITION.get("by")
+
 # The older of two names for one call is still the only one some systems have.
 warnings.simplefilter("ignore", DeprecationWarning)
 
@@ -618,7 +629,7 @@ def key(params):
 
 # Recording, on X11
 
-RECORDINGS = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "praecise-control", "recordings")
+RECORDINGS = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), SLUG, "recordings")
 # What recordings may take up together, and how long one is kept. Older ones go first.
 KEPT_BYTES = int(os.environ.get("PRAECISE_CONTROL_RECORDINGS_BYTES") or 2 * 1024 ** 3)
 KEPT_SECONDS = 24 * 3600
@@ -845,7 +856,7 @@ def handle(line):
         if method is None:
             raise Failure("this helper cannot %s" % name)
         if paused and name != "hello":
-            raise Failure("Praecise Control is paused by the person at this machine")
+            raise Failure(NAME + " is paused by the person at this machine")
         if Atspi is None and name != "hello":
             raise Failure("the accessibility bindings are missing: %s" % ATSPI)
         if params.get("app"):
@@ -868,7 +879,7 @@ def stdio():
             sys.stdout.flush()
 
 
-SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or os.path.expanduser("~/.cache"), "praecise-control.sock")
+SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or os.path.expanduser("~/.cache"), SLUG + ".sock")
 
 
 def relay():
@@ -894,7 +905,7 @@ def relay():
             if joined is not None:
                 break
     if joined is None:
-        sys.stderr.write("Praecise Control is not running in the desktop session; start it there with --app\n")
+        sys.stderr.write(NAME + " is not running in the desktop session; start it there with --app\n")
         sys.exit(69)
 
     def back():
@@ -920,7 +931,7 @@ def app():
         probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         probe.connect(SOCKET)
         probe.close()
-        sys.stderr.write("Praecise Control is already running\n")
+        sys.stderr.write(NAME + " is already running\n")
         sys.exit(0)
     except OSError:
         pass
@@ -1046,7 +1057,9 @@ def app():
         if refs:
             entry("Clear Cache", lambda: clear({"what": "cache"}))
         menu.append(Gtk.SeparatorMenuItem())
-        entry("Quit Praecise Control", Gtk.main_quit)
+        if BY:
+            entry(BY)
+        entry("Quit " + NAME, Gtk.main_quit)
         menu.show_all()
 
     rebuild()
@@ -1062,13 +1075,13 @@ def app():
         try:
             gi.require_version(library, "0.1")
             indicator = getattr(__import__("gi.repository", fromlist=[library]), library)
-            mark = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "mark-48.png")
-            icon = indicator.Indicator.new("praecise-control", mark if os.path.exists(mark) else "input-mouse", indicator.IndicatorCategory.APPLICATION_STATUS)
-            icon.set_title("Praecise Control")
+            mark = os.path.join(HERE, EDITION["mark"]) if EDITION.get("mark") else os.path.join(HERE, "..", "..", "assets", "mark-48.png")
+            icon = indicator.Indicator.new(SLUG, mark if os.path.exists(mark) else "input-mouse", indicator.IndicatorCategory.APPLICATION_STATUS)
+            icon.set_title(NAME)
             icon.set_status(indicator.IndicatorStatus.ACTIVE)
             icon.set_menu(menu)
             # The system's own recording icon while a window is being recorded or pictured, so it is never done unseen.
-            icon.set_attention_icon_full("media-record", "Praecise Control is capturing a window")
+            icon.set_attention_icon_full("media-record", NAME + " is capturing a window")
             seen = [False]
 
             def sign(icon=icon, indicator=indicator, seen=seen):
@@ -1084,7 +1097,7 @@ def app():
         except Exception:
             continue
     if not shown:
-        sys.stderr.write("Praecise Control is running with no icon: this desktop has no place for one, or the indicator library is not installed\n")
+        sys.stderr.write(NAME + " is running with no icon: this desktop has no place for one, or the indicator library is not installed\n")
     try:
         Gtk.main()
     finally:

@@ -22,6 +22,7 @@
 //   CONTROL_ADDRESS              this relay's public address, e.g. https://control.praecise.com
 //   CONTROL_ISSUER               the account service; https://accounts.praecise.com unless said
 //   CONTROL_CLAIMS_HOOK_SECRET   shared with the account service, for the question it asks here
+//   CONTROL_DOWNLOADS_BY_APP     where an app's own edition is got, as JSON: {"<client id>": "<address>"}
 //   CONTROL_DATA                 the folder the list of computers is kept in; a folder in HOME unless said
 //   PORT                         8080 unless said
 //
@@ -150,6 +151,14 @@ const DATA = process.env.CONTROL_DATA ?? (process.env.HOME ? join(process.env.HO
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 /** Where a person gets Praecise Control for a computer. */
 const GET = process.env.CONTROL_DOWNLOADS ?? "https://control.praecise.com/#download";
+/** The same, for an app that has an edition of its own to send its people to: {"<client id>": "<address>"}. */
+const GET_FOR = (() => {
+  try {
+    return JSON.parse(process.env.CONTROL_DOWNLOADS_BY_APP ?? "{}");
+  } catch {
+    return {};
+  }
+})();
 
 /** How many of the latest things done on one computer are kept for its person to read. */
 const RECORD = 200;
@@ -330,7 +339,7 @@ function host(request, socket) {
           const now = Math.floor(Date.now() / 1000);
           const was = record.devices[machine];
           const called = String(message.name ?? "A computer").slice(0, 80);
-          record.devices[machine] = { name: was?.named ? was.name : called, ...(was?.named ? { named: true } : {}), system: ["macos", "windows", "linux"].includes(message.system) ? message.system : "unknown", first: was?.first ?? now, last: now };
+          record.devices[machine] = { name: was?.named ? was.name : called, ...(was?.named ? { named: true } : {}), system: ["macos", "windows", "linux"].includes(message.system) ? message.system : "unknown", edition: /^[a-z0-9-]{1,24}$/.test(String(message.edition ?? "")) ? message.edition : "praecise", first: was?.first ?? now, last: now };
           save();
           const computers = people.get(person) ?? new Map();
           people.set(person, computers);
@@ -434,7 +443,7 @@ function listed(said) {
     if (each.removed && !manages) continue;
     if (!all && !mine.includes(id)) continue;
     const live = computers.get(id);
-    const one = { id, name: each.name, system: each.system, connected: Boolean(live), first_connected: each.first, last_connected: live ? Math.floor(now / 1000) : each.last };
+    const one = { id, name: each.name, system: each.system, edition: each.edition ?? "praecise", connected: Boolean(live), first_connected: each.first, last_connected: live ? Math.floor(now / 1000) : each.last };
     if (each.removed) one.removed = true;
     if (each.paused) one.paused = true;
     const busy = live?.using && now - live.using.at < 30_000 ? live.using : undefined;
@@ -457,7 +466,7 @@ function listed(said) {
     out.push(one);
   }
   // With none yet, an app has somewhere to send its person: where Praecise Control is got for a computer.
-  return { devices: out, inputs: Object.values(INPUTS), get: GET };
+  return { devices: out, inputs: Object.values(INPUTS), get: typeof GET_FOR[said.client_id] === "string" ? GET_FOR[said.client_id] : GET };
 }
 
 /** A person changing their list: a name, removing or restoring a computer, narrowing or withdrawing an app on one. */

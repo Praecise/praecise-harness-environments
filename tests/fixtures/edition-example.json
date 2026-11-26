@@ -1,0 +1,21 @@
+{
+  "id": "example",
+  "name": "Example Control",
+  "by": "Example Control is by Praecise.",
+  "appId": "com.example.control",
+  "executable": "example-control",
+  "slug": "example-control",
+  "icon": "../../computer-control/assets/praecise-control.icns",
+  "relay": "https://praecise-control.app.praecise.cloud",
+  "downloads": "https://app.example/get-control",
+  "connect": {
+    "app": "https://app.example/client.json",
+    "name": "Example",
+    "url": "https://app.example/devices/connect?device={device}"
+  },
+  "usage": {},
+  "wording": {
+    "allow": "Now allow Example on this computer.",
+    "done": "This computer is connected."
+  }
+}

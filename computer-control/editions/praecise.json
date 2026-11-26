@@ -1,0 +1,17 @@
+{
+  "id": "praecise",
+  "name": "Praecise Control",
+  "appId": "com.praecise.control",
+  "executable": "praecise-control",
+  "icon": "../assets/praecise-control.icns",
+  "relay": "https://praecise-control.app.praecise.cloud",
+  "downloads": "https://control.praecise.com/#download",
+  "usage": {},
+  "wording": {
+    "connected": "This computer is reachable by the assistants and apps you allow.",
+    "done": "This computer is connected to Praecise Control."
+  },
+  "slug": "praecise-control",
+  "mark": "../assets/mark-48.png",
+  "ico": "../assets/praecise-control.ico"
+}
