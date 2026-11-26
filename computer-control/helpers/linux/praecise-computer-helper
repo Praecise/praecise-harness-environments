@@ -1,0 +1,656 @@
+#!/usr/bin/env python3
+# The computer control helper for Linux. PROTOCOL.md says what it answers.
+#
+# Elements are read through AT-SPI, which works the same on X11 and on Wayland. An
+# element is pressed by its own accessibility action and a field is filled through its
+# own editable text, which moves no pointer and brings nothing to the front.
+#
+# A pointer and keys by position are another matter. On X11 they can only be made as
+# the one pointer and keyboard the session has, so they are refused unless the helper
+# is started with --own-session, which says the session is the helper's and no person
+# is working in it. On Wayland they need the RemoteDesktop portal, and a picture needs
+# the ScreenCast portal; neither is built here, and both are refused there.
+#
+# Needs: python3-gi, gir1.2-atspi-2.0, and gir1.2-gtk-3.0 for pictures on X11.
+
+import base64
+import getpass
+import json
+import os
+import shlex
+import socket
+import subprocess
+import sys
+import warnings
+
+# The older of two names for one call is still the only one some systems have.
+warnings.simplefilter("ignore", DeprecationWarning)
+
+OWN_SESSION = "--own-session" in sys.argv
+WAYLAND = os.environ.get("XDG_SESSION_TYPE") == "wayland" or (bool(os.environ.get("WAYLAND_DISPLAY")) and not os.environ.get("DISPLAY"))
+
+
+class Failure(Exception):
+    pass
+
+
+try:
+    import gi
+
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+
+    Atspi.init()
+    ATSPI = None
+    # The name of an action is asked for by one of two names, depending on the library's age.
+    ACTION_NAME = getattr(Atspi.Action, "get_name", None) or Atspi.Action.get_action_name
+except Exception as err:  # the bindings or the bus are missing; `hello` says so
+    Atspi = None
+    ATSPI = str(err)
+
+ROLES = {
+    "push button": "button", "toggle button": "button", "link": "link", "entry": "textbox", "password text": "textbox",
+    "combo box": "combobox", "check box": "checkbox", "radio button": "radio", "slider": "slider", "spin button": "spinbutton",
+    "menu item": "menuitem", "check menu item": "menuitem", "radio menu item": "menuitem", "page tab": "tab",
+    "page tab list": "tablist", "label": "text", "static": "text", "heading": "heading", "image": "image", "icon": "image",
+    "table row": "row", "table cell": "cell", "list item": "listitem", "tree item": "treeitem", "frame": "window",
+    "window": "window", "dialog": "dialog", "alert": "dialog", "file chooser": "dialog", "document web": "page",
+    "document frame": "page", "menu": "menu", "menu bar": "menubar", "tool bar": "toolbar", "list": "list", "list box": "list",
+    "tree": "tree", "tree table": "tree", "table": "table", "paragraph": "paragraph", "status bar": "status",
+    "switch": "switch", "search bar": "searchbox",
+}
+# Roles that say only how a window is laid out. Unnamed, they are left out and what is in them is kept.
+LAYOUT = {"filler", "panel", "scroll pane", "split pane", "viewport", "section", "redundant object", "unknown", "layered pane",
+          "root pane", "glass pane", "grouping", "form", "block quote", "application", "invalid"}
+# Roles that are furniture, and are never listed.
+FURNITURE = {"scroll bar", "separator", "tool tip"}
+WORKED = {"button", "link", "textbox", "searchbox", "combobox", "checkbox", "switch", "radio", "tab", "slider", "spinbutton", "menuitem"}
+TYPED = {"textbox", "searchbox", "combobox", "spinbutton"}
+STATED = WORKED | {"row", "treeitem", "listitem", "cell"}
+INTERPRETERS = ("python", "node", "ruby", "perl", "java", "bash", "sh")
+VISITS = 6000
+
+refs = {}      # ref -> (element, app id, role, name)
+named = {}     # element -> ref
+pointer = {}   # app id -> (x, y)
+
+
+def has(element, state):
+    return element.get_state_set().contains(state)
+
+
+def role_of(element):
+    system = element.get_role_name() or "unknown"
+    if system == "text":
+        return system, "textbox" if has(element, Atspi.StateType.EDITABLE) else "text"
+    return system, ROLES.get(system, system.replace(" ", ""))
+
+
+def text_of(element):
+    iface = element.get_text_iface()
+    if iface is None:
+        return None
+    return Atspi.Text.get_text(iface, 0, -1)
+
+
+def name_of(element, said):
+    if said == "text":
+        return (element.get_name() or text_of(element) or "").strip()
+    called = (element.get_name() or "").strip()
+    if called:
+        return called
+    for relation in element.get_relation_set() or []:
+        if relation.get_relation_type() == Atspi.RelationType.LABELLED_BY and relation.get_n_targets():
+            label = relation.get_target(0)
+            return (label.get_name() or text_of(label) or "").strip()
+    return (element.get_description() or "").strip()
+
+
+def value_of(element, said):
+    if said in TYPED:
+        return text_of(element)
+    if said in ("slider", "spinbutton", "progressbar"):
+        iface = element.get_value_iface()
+        if iface is not None:
+            return "%g" % Atspi.Value.get_current_value(iface)
+    return None
+
+
+def states_of(element, said):
+    if said not in STATED:
+        return []
+    out = []
+    if not has(element, Atspi.StateType.SENSITIVE) or not has(element, Atspi.StateType.ENABLED):
+        out.append("disabled")
+    if has(element, Atspi.StateType.FOCUSED):
+        out.append("focused")
+    if has(element, Atspi.StateType.CHECKED):
+        out.append("checked")
+    if has(element, Atspi.StateType.INDETERMINATE):
+        out.append("partly checked")
+    if has(element, Atspi.StateType.PRESSED):
+        out.append("pressed")
+    if has(element, Atspi.StateType.EXPANDABLE):
+        out.append("expanded" if has(element, Atspi.StateType.EXPANDED) else "collapsed")
+    if has(element, Atspi.StateType.SELECTED):
+        out.append("selected")
+    if has(element, Atspi.StateType.REQUIRED):
+        out.append("required")
+    if has(element, Atspi.StateType.INVALID_ENTRY):
+        out.append("invalid")
+    return out
+
+
+def box_of(element):
+    iface = element.get_component_iface()
+    if iface is None:
+        return None
+    rect = Atspi.Component.get_extents(iface, Atspi.CoordType.WINDOW)
+    if rect.width < 1 or rect.height < 1:
+        return None
+    return {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}
+
+
+def ref_for(element, app, said, called):
+    if len(named) > 50000:  # a long session does not keep every element it ever saw
+        named.clear()
+        refs.clear()
+    ref = named.get(element)
+    if ref is None:
+        ref = named[element] = "e%d" % (len(named) + 1)
+    refs[ref] = (element, app, said, called)
+    return ref
+
+
+def describe(element, app):
+    _, said = role_of(element)
+    called = name_of(element, said)
+    out = {"ref": ref_for(element, app, said, called), "role": said}
+    if called:
+        out["name"] = called
+    value = value_of(element, said)
+    if value and value != called:
+        out["value"] = value[:2000]
+    states = states_of(element, said)
+    if states:
+        out["states"] = states
+    box = box_of(element)
+    if box:
+        out["box"] = box
+    return out
+
+
+def children(element):
+    for at in range(element.get_child_count()):
+        child = element.get_child_at_index(at)
+        if child is not None:
+            yield child
+
+
+# Apps
+
+def id_of(pid):
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as file:
+            argv = [part.decode("utf-8", "replace") for part in file.read().split(b"\0") if part]
+    except OSError:
+        return None
+    if not argv:
+        return None
+    program = os.path.basename(argv[0])
+    # A script is the app, not the interpreter that runs it.
+    if program.rstrip("0123456789.").lower() in INTERPRETERS:
+        script = next((arg for arg in argv[1:] if not arg.startswith("-")), None)
+        if script:
+            program = os.path.splitext(os.path.basename(script))[0]
+    return program.lower()
+
+
+def running():
+    desktop = Atspi.get_desktop(0)
+    found = []
+    for app in children(desktop):
+        try:
+            ident = id_of(app.get_process_id())
+            if ident and app.get_child_count():
+                found.append((ident, app))
+        except Exception:
+            continue
+    return found
+
+
+def installed():
+    found = {}
+    folders = ["/usr/share/applications", "/usr/local/share/applications", os.path.expanduser("~/.local/share/applications")]
+    for folder in folders:
+        try:
+            entries = os.listdir(folder)
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.endswith(".desktop"):
+                continue
+            name = command = None
+            hidden = False
+            try:
+                with open(os.path.join(folder, entry), encoding="utf-8", errors="replace") as file:
+                    for line in file:
+                        if line.startswith("[") and not line.startswith("[Desktop Entry]"):
+                            break
+                        if line.startswith("Name=") and name is None:
+                            name = line[5:].strip()
+                        elif line.startswith("Exec=") and command is None:
+                            command = line[5:].strip()
+                        elif line.strip() in ("NoDisplay=true", "Hidden=true"):
+                            hidden = True
+            except OSError:
+                continue
+            if name and command and not hidden:
+                words = [word for word in shlex.split(command) if not word.startswith("%")]
+                if words:
+                    found[os.path.basename(words[0]).lower()] = (name, words)
+    return found
+
+
+def apps(_params):
+    found = {ident: (name, None) for ident, (name, _words) in installed().items()}
+    for ident, app in running():
+        found.setdefault(ident, (app.get_name() or ident, None))
+    return sorted(({"id": ident, "name": name} for ident, (name, _) in found.items()), key=lambda each: each["name"].lower())
+
+
+def open_app(params):
+    ident = str(params.get("app") or "")
+    if any(each == ident for each, _ in running()):
+        return None
+    entry = installed().get(ident)
+    if not entry:
+        raise Failure("there is no app with that id on this machine")
+    subprocess.Popen(entry[1], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return None
+
+
+def target(params):
+    if Atspi is None:
+        raise Failure("the accessibility bindings are missing: %s" % ATSPI)
+    ident = str(params.get("app") or "")
+    if not ident:
+        raise Failure("`app` is the app's id, from `apps`")
+    mine = [app for each, app in running() if each == ident]
+    if not mine:
+        raise Failure("%s is not running, or does not speak to the accessibility bus; open it first" % ident)
+    windows = [window for app in mine for window in children(app) if has(window, Atspi.StateType.SHOWING)]
+    if not windows:
+        raise Failure("%s has no window; open one first" % ident)
+    window = next((each for each in windows if has(each, Atspi.StateType.ACTIVE)), windows[0])
+    iface = window.get_component_iface()
+    rect = Atspi.Component.get_extents(iface, Atspi.CoordType.SCREEN) if iface is not None else None
+    if rect is None or rect.width < 1 or rect.height < 1:
+        raise Failure("%s has no window with a size; open one first" % ident)
+    return ident, window, rect
+
+
+def window(params):
+    _, found, rect = target(params)
+    return {"width": rect.width, "height": rect.height, "title": found.get_name() or ""}
+
+
+def live(ref, ident):
+    known = refs.get(ref)
+    if known is None or known[1] != ident:
+        raise Failure("%s is not a reference this window has given; read it again" % ref)
+    element, _, was, called = known
+    try:
+        gone = has(element, Atspi.StateType.DEFUNCT) or not has(element, Atspi.StateType.SHOWING)
+        _, said = role_of(element)
+        now = name_of(element, said)
+    except Exception:
+        gone = True
+    if gone:
+        raise Failure("%s is no longer in the window; read it again" % ref)
+    if said != was or now != called:
+        raise Failure("%s is no longer in the window (it is now %s%s); read it again" % (ref, said, ' "%s"' % now if now else ""))
+    return element
+
+
+def read(params):
+    ident, root, _ = target(params)
+    interactive = params.get("filter") == "interactive"
+    depth = params.get("depth")
+    if params.get("ref"):
+        root = live(str(params["ref"]), ident)
+    visits = [0]
+    flat = []
+
+    def walk(element, level, within):
+        visits[0] += 1
+        if visits[0] > VISITS:
+            return []
+        try:
+            system, said = role_of(element)
+            if system in FURNITURE or not has(element, Atspi.StateType.SHOWING):
+                return []
+            called = name_of(element, said)
+        except Exception:
+            return []
+        # A button named for its label holds that label again inside it; once is enough.
+        if said == "text" and within and called in within:
+            return []
+        kept = not (system in LAYOUT and not called) and not (said == "text" and not called)
+
+        def below(next_level, inside):
+            return [found for child in children(element) for found in walk(child, next_level, inside)]
+
+        if not kept:
+            return below(level, within)
+        out = describe(element, ident)
+        if interactive:
+            if said in WORKED:
+                flat.append(out)
+            below(level + 1, called)
+            return []
+        if depth is None or level < depth:
+            inside = below(level + 1, "" if said == "window" else called)
+            if inside:
+                out["children"] = inside
+        return [out]
+
+    tree = walk(root, 1, "")
+    return flat if interactive else tree
+
+
+def locate(params):
+    ident, _, _ = target(params)
+    ref = str(params.get("ref") or "")
+    element = live(ref, ident)
+    iface = element.get_component_iface()
+    if iface is not None:
+        try:
+            Atspi.Component.scroll_to(iface, Atspi.ScrollType.ANYWHERE)
+        except Exception:
+            pass  # not every toolkit can, and one that cannot has nothing to scroll
+    out = describe(element, ident)
+    if "box" not in out:
+        raise Failure("%s takes up no room in the window; read it again" % ref)
+    return out
+
+
+def activate(params):
+    ident, _, _ = target(params)
+    ref = str(params.get("ref") or "")
+    element = live(ref, ident)
+    if not has(element, Atspi.StateType.SENSITIVE):
+        raise Failure("%s is disabled" % ref)
+    iface = element.get_action_iface()
+    if iface is not None:
+        names = [(ACTION_NAME(iface, at) or "").lower() for at in range(Atspi.Action.get_n_actions(iface))]
+        for wanted in ("click", "press", "activate", "jump", "toggle", "open"):
+            if wanted in names:
+                if not Atspi.Action.do_action(iface, names.index(wanted)):
+                    raise Failure("%s could not be pressed" % ref)
+                return None
+    component = element.get_component_iface()
+    if component is not None and has(element, Atspi.StateType.FOCUSABLE) and Atspi.Component.grab_focus(component):
+        return None
+    raise Failure("%s cannot be pressed without the pointer; click where it is" % ref)
+
+
+def fill(params):
+    ident, _, _ = target(params)
+    ref = str(params.get("ref") or "")
+    value = params.get("value")
+    if not isinstance(value, str):
+        raise Failure("`value` is what the field should hold")
+    element = live(ref, ident)
+    _, said = role_of(element)
+    if said not in TYPED:
+        raise Failure("%s is a %s, which is not typed into; press it and choose" % (ref, said))
+    iface = element.get_editable_text_iface()
+    if iface is None or not has(element, Atspi.StateType.EDITABLE):
+        raise Failure("%s does not take a value directly; click it and type" % ref)
+    if not Atspi.EditableText.set_text_contents(iface, value):
+        raise Failure("%s refused the value" % ref)
+    return None
+
+
+# Pictures, on X11
+
+def screenshot(params):
+    _, _, rect = target(params)
+    if WAYLAND:
+        raise Failure("a picture of a window on Wayland needs the ScreenCast portal, which this helper does not use yet; read the window's elements")
+    try:
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import Gdk, GdkPixbuf
+    except Exception as err:
+        raise Failure("a picture needs gir1.2-gtk-3.0: %s" % err)
+    if Gdk.Display.get_default() is None:
+        raise Failure("there is no display to take a picture of")
+    root = Gdk.get_default_root_window()
+    picture = Gdk.pixbuf_get_from_window(root, rect.x, rect.y, rect.width, rect.height)
+    if picture is None:
+        raise Failure("the window could not be pictured")
+    region = params.get("region")
+    if region:
+        x, y = int(region["x"]), int(region["y"])
+        width, height = int(min(region["width"], rect.width - x)), int(min(region["height"], rect.height - y))
+        if width < 1 or height < 1 or x < 0 or y < 0:
+            raise Failure("that region has no area in the window")
+        # Enlarged to fill the window's own size, and no further than is still a picture of something.
+        scale = max(1.0, min(4.0, rect.width / width, rect.height / height))
+        picture = picture.new_subpixbuf(x, y, width, height).scale_simple(int(width * scale), int(height * scale), GdkPixbuf.InterpType.BILINEAR)
+    ok, data = picture.save_to_bufferv("png", [], [])
+    if not ok:
+        raise Failure("the picture could not be written")
+    return {"mime": "image/png", "data": base64.b64encode(data).decode("ascii"), "name": "zoom.png" if region else "screenshot.png"}
+
+
+# Pointer and keys, in a session of the helper's own
+
+KEYS = {
+    "return": 0xFF0D, "enter": 0xFF0D, "kp_enter": 0xFF8D, "tab": 0xFF09, "escape": 0xFF1B, "esc": 0xFF1B, "backspace": 0xFF08,
+    "delete": 0xFFFF, "insert": 0xFF63, "space": 0x20, "home": 0xFF50, "end": 0xFF57, "pageup": 0xFF55, "page_up": 0xFF55,
+    "prior": 0xFF55, "pagedown": 0xFF56, "page_down": 0xFF56, "next": 0xFF56, "left": 0xFF51, "arrowleft": 0xFF51,
+    "up": 0xFF52, "arrowup": 0xFF52, "right": 0xFF53, "arrowright": 0xFF53, "down": 0xFF54, "arrowdown": 0xFF54,
+}
+HELD = {"shift": 0xFFE1, "ctrl": 0xFFE3, "control": 0xFFE3, "alt": 0xFFE9, "super": 0xFFEB, "meta": 0xFFEB, "cmd": 0xFFEB, "command": 0xFFEB}
+BUTTONS = {"left": 1, "middle": 2, "right": 3}
+
+
+def own_session(what):
+    if WAYLAND:
+        raise Failure("%s by position on Wayland needs the RemoteDesktop portal, which this helper does not use yet; press the element instead" % what)
+    if not OWN_SESSION:
+        raise Failure("%s by position would take the pointer and keyboard of whoever is at this machine; press the element instead, "
+                      "or start the helper with --own-session in a session of its own" % what)
+
+
+def place(value, ident, rect):
+    try:
+        x, y = int(value["x"]), int(value["y"])
+    except Exception:
+        raise Failure("a position is { x, y } in pixels of the window")
+    if x < 0 or y < 0 or x >= rect.width or y >= rect.height:
+        raise Failure("[%d, %d] is outside the window" % (x, y))
+    pointer[ident] = (x, y)
+    return rect.x + x, rect.y + y
+
+
+def keycode_of(keysym):
+    """The key on this session's keyboard that makes a symbol: a key is held by the key it is, not by what it types."""
+    try:
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk
+        display = Gdk.Display.get_default()
+        found, keys = Gdk.Keymap.get_for_display(display).get_entries_for_keyval(keysym) if display is not None else (False, [])
+    except Exception as err:
+        raise Failure("holding a key needs gir1.2-gtk-3.0: %s" % err)
+    if not found or not keys:
+        raise Failure("this session's keyboard has no key for that")
+    return keys[0].keycode
+
+
+def holding(modifiers, press):
+    codes = []
+    for each in modifiers or []:
+        symbol = HELD.get(str(each).lower())
+        if symbol is None:
+            raise Failure('"%s" is not a key that can be held' % each)
+        codes.append(keycode_of(symbol))
+    for code in codes:
+        Atspi.generate_keyboard_event(code, None, Atspi.KeySynthType.PRESS)
+    try:
+        press()
+    finally:
+        for code in reversed(codes):
+            Atspi.generate_keyboard_event(code, None, Atspi.KeySynthType.RELEASE)
+
+
+def click(params):
+    ident, _, rect = target(params)
+    own_session("a click")
+    x, y = place(params.get("at"), ident, rect)
+    button = BUTTONS.get(params.get("button") or "left", 1)
+    count = max(1, min(3, int(params.get("count") or 1)))
+
+    def press():
+        Atspi.generate_mouse_event(x, y, "abs")
+        for _ in range(count):
+            Atspi.generate_mouse_event(x, y, "b%dc" % button)
+
+    holding(params.get("modifiers"), press)
+    return None
+
+
+def move(params):
+    ident, _, rect = target(params)
+    own_session("a move")
+    x, y = place(params.get("to"), ident, rect)
+    Atspi.generate_mouse_event(x, y, "abs")
+    return None
+
+
+def drag(params):
+    ident, _, rect = target(params)
+    own_session("a drag")
+    fx, fy = place(params.get("from"), ident, rect)
+    tx, ty = place(params.get("to"), ident, rect)
+
+    def press():
+        Atspi.generate_mouse_event(fx, fy, "abs")
+        Atspi.generate_mouse_event(fx, fy, "b1p")
+        # By way of the middle: an app that starts a drag on movement needs to see some.
+        Atspi.generate_mouse_event((fx + tx) // 2, (fy + ty) // 2, "abs")
+        Atspi.generate_mouse_event(tx, ty, "abs")
+        Atspi.generate_mouse_event(tx, ty, "b1r")
+
+    holding(params.get("modifiers"), press)
+    return None
+
+
+def scroll(params):
+    ident, _, rect = target(params)
+    own_session("a scroll")
+    x, y = place(params.get("at"), ident, rect)
+    by = params.get("by") or {}
+    dx, dy = int(by.get("dx") or 0), int(by.get("dy") or 0)
+
+    def press():
+        Atspi.generate_mouse_event(x, y, "abs")
+        for _ in range(abs(dy)):
+            Atspi.generate_mouse_event(x, y, "b5c" if dy > 0 else "b4c")
+        for _ in range(abs(dx)):
+            Atspi.generate_mouse_event(x, y, "b7c" if dx > 0 else "b6c")
+
+    holding(params.get("modifiers"), press)
+    return None
+
+
+def type_text(params):
+    target(params)
+    own_session("typing")
+    text = params.get("text")
+    if not isinstance(text, str):
+        raise Failure("`text` is what to type")
+    for nth, line in enumerate(text.replace("\r\n", "\n").replace("\r", "\n").split("\n")):
+        if nth:
+            Atspi.generate_keyboard_event(KEYS["return"], None, Atspi.KeySynthType.SYM)
+        if line:
+            Atspi.generate_keyboard_event(0, line, Atspi.KeySynthType.STRING)
+    return None
+
+
+def key(params):
+    target(params)
+    own_session("a key")
+    combo = str(params.get("combo") or "").strip()
+    if not combo:
+        raise Failure("`combo` is the key to press")
+    parts = [part.strip() for part in combo.split("+") if part.strip()]
+    if combo.endswith("+"):
+        parts.append("+")
+    last = parts.pop()
+    lower = last.lower()
+    if lower in KEYS:
+        code = KEYS[lower]
+    elif len(lower) > 1 and lower[0] == "f" and lower[1:].isdigit() and 1 <= int(lower[1:]) <= 24:
+        code = 0xFFBD + int(lower[1:])
+    elif len(last) == 1 and ord(last) < 0x100:
+        code = ord(last)
+    else:
+        raise Failure('"%s" in "%s" is not a key this helper knows' % (last, combo))
+    holding(parts, lambda: Atspi.generate_keyboard_event(code, None, Atspi.KeySynthType.SYM))
+    return None
+
+
+def cursor(params):
+    x, y = pointer.get(str(params.get("app") or ""), (0, 0))
+    return {"x": x, "y": y}
+
+
+def hello(_params):
+    reached = False
+    if Atspi is not None:
+        try:
+            Atspi.get_desktop(0).get_child_count()
+            reached = True
+        except Exception:
+            reached = False
+    return {
+        "system": "linux",
+        "user": getpass.getuser(),
+        "host": socket.gethostname(),
+        "can": ["activate", "fill"],
+        "needs": [
+            {"name": "Accessibility bindings", "ok": Atspi is not None, "fix": "Install python3-gi and gir1.2-atspi-2.0."},
+            {"name": "Accessibility bus", "ok": reached, "fix": "Start the helper inside the desktop session, with at-spi2-core installed."},
+        ],
+    }
+
+
+METHODS = {
+    "hello": hello, "apps": apps, "open": open_app, "window": window, "screenshot": screenshot, "read": read, "locate": locate,
+    "activate": activate, "fill": fill, "click": click, "move": move, "drag": drag, "scroll": scroll, "type": type_text,
+    "key": key, "cursor": cursor,
+}
+
+for line in sys.stdin:
+    try:
+        asked = json.loads(line)
+        ident = asked["id"]
+    except Exception:
+        continue
+    try:
+        method = METHODS.get(asked.get("method"))
+        if method is None:
+            raise Failure("this helper cannot %s" % asked.get("method"))
+        if Atspi is None and asked.get("method") != "hello":
+            raise Failure("the accessibility bindings are missing: %s" % ATSPI)
+        answer = {"id": ident, "result": method(asked.get("params") or {})}
+    except Failure as failure:
+        answer = {"id": ident, "error": str(failure)}
+    except Exception as err:
+        answer = {"id": ident, "error": "%s: %s" % (type(err).__name__, err)}
+    sys.stdout.write(json.dumps(answer) + "\n")
+    sys.stdout.flush()

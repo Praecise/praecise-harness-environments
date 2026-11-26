@@ -56,7 +56,7 @@ let ROLES: [String: String] = [
   "AXMenuBar": "menubar", "AXRadioGroup": "radiogroup", "AXProgressIndicator": "progressbar",
 ]
 /// Roles that say only how a window is laid out. Unnamed, they are left out and what is in them is kept.
-let LAYOUT: Set<String> = ["AXGroup", "AXScrollArea", "AXSplitGroup", "AXLayoutArea", "AXLayoutItem", "AXUnknown", "AXColumn", "AXGenericElement"]
+let LAYOUT: Set<String> = ["AXMenu", "AXGroup", "AXScrollArea", "AXSplitGroup", "AXLayoutArea", "AXLayoutItem", "AXUnknown", "AXColumn", "AXGenericElement"]
 /// Roles that are furniture of a scroll area or a split, and are never listed.
 let FURNITURE: Set<String> = ["AXScrollBar", "AXSplitter", "AXGrowArea", "AXValueIndicator", "AXHandle", "AXRuler"]
 let WORKED: Set<String> = ["button", "link", "textbox", "searchbox", "combobox", "checkbox", "switch", "radio", "tab", "slider", "spinbutton", "menuitem"]
@@ -141,6 +141,7 @@ func states(_ element: AXUIElement, _ said: String) -> [String] {
     if value.intValue == 1 { states.append(said == "tab" ? "selected" : "checked") } else if value.intValue == 2 { states.append("partly checked") }
   }
   if flag(element, kAXSelectedAttribute) == true, !states.contains("selected") { states.append("selected") }
+  if said == "menuitem", let mark = text(element, kAXMenuItemMarkCharAttribute), !mark.isEmpty { states.append("checked") }
   if worked, let expanded = flag(element, kAXExpandedAttribute) { states.append(expanded ? "expanded" : "collapsed") }
   return states
 }
@@ -184,6 +185,8 @@ func read(_ params: [String: Any]) throws -> Any {
     let called = name(element, said)
     // A button named for its label holds that label again inside it; once is enough.
     if said == "text", !within.isEmpty, within.contains(called) { return [] }
+    // A menu item with no name is a line between the others.
+    if said == "menuitem", called.isEmpty { return [] }
     let kept = !(LAYOUT.contains(system) && called.isEmpty) && !(said == "text" && called.isEmpty)
     func below(_ next: Int, _ inside: String) -> [[String: Any]] { children(element).flatMap { walk($0, next, inside) } }
     if !kept { return below(level, within) }
@@ -199,7 +202,16 @@ func read(_ params: [String: Any]) throws -> Any {
     }
     return [out]
   }
-  let tree = walk(root, 1, "")
+  var tree = walk(root, 1, "")
+  // An app's menus are not in its window. They are listed beside it by name only: reading one by its
+  // reference gives what is in it, and pressing an item there needs neither the pointer nor the app in front.
+  if !interactive, params["ref"] == nil, let bar = attribute(target.app, kAXMenuBarAttribute), CFGetTypeID(bar) == AXUIElementGetTypeID() {
+    let menus = children(bar as! AXUIElement).compactMap { each -> [String: Any]? in
+      let called = name(each, "menuitem")
+      return called.isEmpty || called == "Apple" ? nil : ["ref": ref(for: each, app: target.id, role: "menuitem", name: called), "role": "menuitem", "name": called]
+    }
+    if !menus.isEmpty { tree.append(["ref": ref(for: bar as! AXUIElement, app: target.id, role: "menubar", name: ""), "role": "menubar", "children": menus]) }
+  }
   return interactive ? flat : tree
 }
 
@@ -222,7 +234,12 @@ func locate(_ params: [String: Any]) throws -> Any {
   guard let ref = params["ref"] as? String else { return try fail("`ref` is the element") }
   let element = try live(ref, in: target)
   if actions(element).contains("AXScrollToVisible") { AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) }
-  let out = describe(element, in: target)
+  var out = describe(element, in: target)
+  if ["menuitem", "menubar"].contains(out["role"] as? String ?? "") {
+    // A menu and what is in it are pressed, never pointed at: they are given a place that is not in the window.
+    out["box"] = ["x": -1, "y": -1, "width": 1, "height": 1]
+    return out
+  }
   guard let box = frame(element), box.width >= 1, box.height >= 1, out["box"] != nil else { return try fail("\(ref) takes up no room in the window; read it again") }
   return out
 }

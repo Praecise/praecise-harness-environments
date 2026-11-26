@@ -26,6 +26,10 @@ Anything it has to say that is not an answer goes to standard error.
   there. `locate` and every method that takes a `ref` look the element up as it is now
   and answer with an error if it has gone, is hidden, or has a different role or name
   than when it was read. A reference is never taken to mean whatever is in its place.
+- **Menus that are not in the window** are listed beside it in a full `read` as one
+  `menubar` holding a `menuitem` for each, by name only. `read` with one's `ref` gives
+  what is in it. They are pressed, never pointed at: `locate` puts them outside the
+  window.
 - **Leave out the layout.** Unnamed containers are left out and what is in them kept.
 - **Refuse, do not fall back.** A method the system cannot perform for this app is an
   error that says so. A helper does not quietly do it another way that takes the

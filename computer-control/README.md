@@ -79,6 +79,19 @@ environment starts and speaks to in lines of JSON. [PROTOCOL.md](PROTOCOL.md) is
 a helper answers. `helper` names the command; `praecise-computer-helper` on the path
 is used otherwise.
 
+Each helper was tried against a small real app with a field, a button that saves and
+then goes, a line of text and a checkbox (`tests/fixtures`), and what each can and
+cannot do is below.
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Read a window as elements | Accessibility API | AT-SPI, on X11 and Wayland | UI Automation |
+| Press and fill by reference, without the pointer | yes | yes | yes |
+| Picture of a window | ScreenCaptureKit | X11 only | PrintWindow, also behind another window |
+| Pointer and keys by position | posted to the app's process | X11, and only in a session of the helper's own | posted to the window under the position |
+| Chords | not acted on by an app that is not in front | yes, in its own session | refused, except shift with a character |
+| Menus | listed beside the window, read by reference | in the window | in the window |
+
 ### macOS
 
 [helpers/macos](helpers/macos/) is one Swift file, for macOS 14 and later.
@@ -91,21 +104,52 @@ It builds with one compiler job at the lowest priority, in about ten seconds. It
 Accessibility and Screen Recording, which macOS asks of the program that starts it: the
 terminal, or the app the harness runs in. `doctor` says which is missing.
 
-It reads elements through the Accessibility API and pictures a window through
-ScreenCaptureKit, at the window's size in points. An element is pressed by its own
-accessibility action, which moves no pointer and brings nothing to the front. Pointer
-and key events by position are posted to the app's process only; an app that ignores
-events posted that way is not reached another way. An app's menu bar is not read.
+Tried against TextEdit kept behind another app: reading, filling, pressing a button,
+typing, single keys, a picture and a zoom all worked, and nothing was brought to the
+front. What did not: a Command chord, and Select All pressed in the Edit menu by
+reference. Both act on whatever has the keyboard, and an app that is not in front has
+nothing that does. Replace what a field holds with `fill`. Where a piece of work needs
+such commands, run the apps in a second user session that is the agent's own.
+
+### Linux
+
+[helpers/linux](helpers/linux/) is one Python file. It needs `python3-gi` and
+`gir1.2-atspi-2.0`, and `gir1.2-gtk-3.0` for pictures and held keys on X11. It has to be
+started inside the desktop session, where the accessibility bus is.
+
+Elements, pressing and filling work the same on X11 and Wayland. A pointer and keys by
+position on X11 can only be the one pointer and keyboard the session has, so they are
+refused unless the helper is started with `--own-session`, which says no person is
+working in that session. On Wayland they need the RemoteDesktop portal, and a picture
+needs the ScreenCast portal; neither is used yet, and both are refused there.
+
+Tried in a session of its own (Xvfb, a GTK 3 app) through the whole environment, with
+`tests/computer-control-real.test.ts`.
+
+### Windows
+
+[helpers/windows](helpers/windows/) is one C# file, built with the compiler that is part
+of Windows. Nothing is installed.
+
+```
+computer-control\helpers\windows\build.cmd C:\tools\praecise-computer-helper.exe
+```
+
+It has to run in the session of whoever is signed in: one started by a service or over
+SSH can see no window, and says so. Only apps with a window of their own are listed;
+an app from the Store that is shown inside another process's frame is not.
+
+Tried against a Windows Forms app in the signed-in session with
+`tests/fixtures/windows-check.ps1`: 28 checks.
 
 ## What is not done
 
-- **Only the macOS helper is written.** It has read real windows, kept its references
-  across readings, refused one it never gave, and pictured and zoomed a window. Its
-  pressing, filling, typing and pointer have not been tried against an app, and it is
-  not signed. The environment's own tests run against a stand-in.
-- **Linux and Windows helpers are not written.** What each rests on is in
-  [FRONTIER.md](FRONTIER.md): AT-SPI and the RemoteDesktop portal on Wayland, and UI
-  Automation.
+- **No helper is signed or packaged.** Each is built from its one file where it is used.
+- **Wayland** has elements, pressing and filling, and no picture or pointer.
+- **Each helper was tried against one small app.** Which real apps ignore posted events,
+  or describe themselves poorly to assistive technology, is not known.
+- **The Windows helper was tried by itself**, not through the environment, because the
+  environment's test starts the helper and a helper started over SSH sees no window.
 - **It needs a harness later than 1.2.1**, for `elements()` and for an action whose
   kind depends on the call. Both are on the harness's main branch and not on npm.
 - **The person's signed-in browser.** A page in the browser the harness starts is read

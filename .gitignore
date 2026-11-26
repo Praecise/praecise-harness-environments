@@ -7,3 +7,5 @@ apple.env
 *.provisionprofile
 .DS_Store
 computer-control/helpers/macos/praecise-computer-helper
+computer-control/helpers/windows/praecise-computer-helper.exe
+__pycache__/
