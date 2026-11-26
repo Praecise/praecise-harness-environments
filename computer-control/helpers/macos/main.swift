@@ -559,7 +559,7 @@ func storage() -> Any {
 }
 
 func connected() -> Any {
-  sessions.values.sorted { $0.since < $1.since }.map { ["since": Int($0.since.timeIntervalSince1970), "app": $0.app, "last": Int($0.last.timeIntervalSince1970)] as [String: Any] }
+  sessions.values.sorted { $0.since < $1.since }.map { ["since": Int($0.since.timeIntervalSince1970), "app": $0.app, "last": $0.last == .distantPast ? 0 : Int($0.last.timeIntervalSince1970)] as [String: Any] }
 }
 
 /// Remove what is kept. A recording that is still running is left alone.

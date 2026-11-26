@@ -15,7 +15,7 @@ Not released. See [What is not done](#what-is-not-done).
 | `computer_control_elements` | Read a window as elements, find by words, and click, hover, fill and scroll to an element by reference. Each answer says what appeared, went or changed. |
 | `computer_control_screen` | A screenshot of the window, zoom, and a pointer and keys by position. |
 | `computer_control_open` | Start an app or bring up its window. |
-| `computer_control_record` | Record a window as video, and take pictures from a recording. macOS, and Linux on X11. |
+| `computer_control_record` | Record a window as video, and take pictures from a recording. macOS, Windows, and Linux on X11. |
 
 One skill, `use-an-app`, and one agent, `app-operator`.
 
@@ -77,8 +77,24 @@ from it.
 
 The machine is reached through Praecise Control, one small program per system. It is
 an app a person can see, in the menu bar on a Mac and in the corner of the taskbar on
-Windows and Linux. Its menu says which app an agent is using, pauses and resumes it,
-and quits it. While it is paused every request is refused.
+Windows and Linux. Its menu is where a person sees and manages everything it holds:
+
+| In the menu | What it does |
+|---|---|
+| Agents | How many programs are connected, the app each is using and since when. Pause refuses every request until Resume. Disconnect All closes them from this end |
+| Stored | How many recordings are kept and how much room they take of what is allowed. Show Recordings opens the folder. Delete All Recordings asks first |
+| Cache | How many things are remembered from windows, which is how a reference still means the same thing. Clear Cache forgets them; an agent reads again |
+| Permissions (Mac) | Whether Accessibility and Screen Recording are allowed, and the way to allow them |
+| Start when I sign in (Windows) | Whether the app starts with the session |
+
+The menu is the system's own on each: the menu bar's on a Mac, with named sections and
+symbols; Windows' own menu and question box, which each version of Windows draws its
+own way; and on Linux the menu the desktop draws for a tray icon, with nothing drawn by
+a toolkit of the helper's. So it looks as that version of the system does, without
+the helper deciding how.
+
+What the menu shows a helper also answers (`storage`, `sessions`, `clear`), for a
+person's own programs. An agent is not offered these.
 
 A harness does not start the app. It starts a relay, which passes what it is asked to
 the app and the app's answers back:
@@ -193,7 +209,7 @@ recording stops by itself at the length it was started with, at most ten minutes
 |---|---|
 | Linux | X11, through FFmpeg, which has to be installed. Sound from the machine with `audio: true`. Tried through the whole environment: start, a second start refused, stop, three pictures. Sound was not tried |
 | macOS | ScreenCaptureKit, written by the system's own encoder; nothing to install. Sound from the app with `audio: true`. Tried against a window: start, a second start refused, stop, three pictures. Sound was not tried, and it was not tried through the environment |
-| Windows | Not written. Windows' own capture is not reachable from the compiler that is part of Windows, and FFmpeg is not something to ask every person to install |
+| Windows | Pictures of the window taken the way one picture is, one after another, written as a Motion-JPEG video (`.avi`) with nothing but what is part of Windows. No sound. Tried through the whole environment; Windows itself reads the file as a video of the right length |
 
 ## The browser a person is signed in to
 
@@ -305,7 +321,8 @@ later than 1.2.1.
 - **The Mac app is signed and not notarized.** Notarizing needs a credential stored on
   the Mac that builds it. The Windows app is not signed and has no icon of its own.
   Nothing has an installer.
-- **The Linux icon was not seen.** It was tried where there is no panel to show it in.
+- **No menu was seen or pressed.** What each menu item does was tried through what a
+  helper answers; the menus themselves, and the Linux icon, were not looked at.
 - **Wayland** has elements, pressing and filling, and no picture or pointer.
 - **Each helper was tried against one small app.** Which real apps ignore posted events,
   or describe themselves poorly to assistive technology, is not known.
