@@ -620,6 +620,7 @@ static class Helper {
     var target = Find(asked);
     var width = target.Rect.Right - target.Rect.Left;
     var height = target.Rect.Bottom - target.Rect.Top;
+    System.Threading.Interlocked.Exchange(ref pictured, DateTime.UtcNow.AddSeconds(3).Ticks);
     using (var whole = new Bitmap(width, height, PixelFormat.Format32bppArgb)) {
       using (var graphics = Graphics.FromImage(whole)) {
         var dc = graphics.GetHdc();
@@ -831,6 +832,9 @@ static class Helper {
   const double KeptSeconds = 24 * 3600;
   const int Longest = 600;
   static readonly Dictionary<string, Recorder> Recording = new Dictionary<string, Recorder>();
+  // Until when a window was just pictured. The icon by the clock shows it for that long, and for as long as one is recorded.
+  static long pictured = 0;
+  public static bool Capturing { get { return Recording.Count > 0 || DateTime.UtcNow.Ticks < System.Threading.Interlocked.Read(ref pictured); } }
 
   static long ReadLimit() {
     long said;
@@ -1161,6 +1165,23 @@ static class Tray {
       Helper.Serve();
       System.Windows.Forms.Application.EnableVisualStyles();
       var icon = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location), Text = "Praecise Control", Visible = true };
+      // Red while a window is being recorded or pictured, so it is never done unseen.
+      var usual = icon.Icon;
+      System.Drawing.Icon red;
+      using (var dot = new System.Drawing.Bitmap(16, 16)) {
+        using (var g = System.Drawing.Graphics.FromImage(dot)) { g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias; g.Clear(System.Drawing.Color.Transparent); g.FillEllipse(System.Drawing.Brushes.Red, 2, 2, 12, 12); }
+        red = System.Drawing.Icon.FromHandle(dot.GetHicon());
+      }
+      var shown = false;
+      var sign = new System.Windows.Forms.Timer { Interval = 1000 };
+      sign.Tick += delegate {
+        var now = Helper.Capturing;
+        if (now == shown) return;
+        shown = now;
+        icon.Icon = now ? red : usual;
+        icon.Text = now ? "Praecise Control is capturing a window" : Helper.Paused ? "Praecise Control, paused" : "Praecise Control";
+      };
+      sign.Start();
       // The system's own menu, drawn by whichever Windows this is in the way that Windows draws menus.
       var menu = new System.Windows.Forms.ContextMenu();
       // Built as it is opened, so it says what is true now.
@@ -1176,6 +1197,7 @@ static class Tray {
         foreach (var each in kept) bytes += each.Length;
 
         // Who is connected.
+        if (Helper.Capturing) say("Capturing a window now");
         say(Helper.Paused ? "Paused: agents are refused" : joined.Count == 0 ? "No agent is connected" : joined.Count == 1 ? "1 agent is connected" : joined.Count + " agents are connected");
         foreach (var each in joined) say("    " + (each.App == "" ? "has not used an app yet" : "using " + each.App + ", " + Ago(each.Last)) + ", connected " + Ago(each.Since));
         offer(Helper.Paused ? "Resume" : "Pause", () => { Helper.Paused = !Helper.Paused; icon.Text = Helper.Paused ? "Praecise Control, paused" : "Praecise Control"; });

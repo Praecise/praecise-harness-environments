@@ -426,9 +426,11 @@ def fill(params):
 # Pictures, on X11
 
 def screenshot(params):
+    global pictured_until
     _, _, rect = target(params)
     if WAYLAND:
         raise Failure("a picture of a window on Wayland needs the ScreenCast portal, which this helper does not use yet; read the window's elements")
+    pictured_until = time.time() + 3
     try:
         gi.require_version("Gdk", "3.0")
         gi.require_version("GdkPixbuf", "2.0")
@@ -622,6 +624,12 @@ KEPT_BYTES = int(os.environ.get("PRAECISE_CONTROL_RECORDINGS_BYTES") or 2 * 1024
 KEPT_SECONDS = 24 * 3600
 LONGEST = 600
 recording = {}   # id -> {process, path, started, limit}
+# Until when a window was just pictured. The icon shows it for that long, and for as long as one is recorded.
+pictured_until = 0.0
+
+
+def capturing():
+    return bool(recording) or time.time() < pictured_until
 
 
 def prune():
@@ -1012,6 +1020,8 @@ def app():
         all_kept = kept()
 
         # Who is connected.
+        if capturing():
+            entry("Capturing a window now")
         entry("Paused: agents are refused" if paused else "No agent is connected" if not joined else "1 agent is connected" if len(joined) == 1 else "%d agents are connected" % len(joined))
         for each_one in joined:
             entry("    %s, connected %s" % ("using %s, %s" % (each_one["app"], ago(each_one["last"])) if each_one["app"] else "has not used an app yet", ago(each_one["since"])))
@@ -1057,6 +1067,18 @@ def app():
             icon.set_title("Praecise Control")
             icon.set_status(indicator.IndicatorStatus.ACTIVE)
             icon.set_menu(menu)
+            # The system's own recording icon while a window is being recorded or pictured, so it is never done unseen.
+            icon.set_attention_icon_full("media-record", "Praecise Control is capturing a window")
+            seen = [False]
+
+            def sign(icon=icon, indicator=indicator, seen=seen):
+                now = capturing()
+                if now != seen[0]:
+                    seen[0] = now
+                    icon.set_status(indicator.IndicatorStatus.ATTENTION if now else indicator.IndicatorStatus.ACTIVE)
+                return True
+
+            GLib.timeout_add_seconds(1, sign)
             shown = True
             break
         except Exception:

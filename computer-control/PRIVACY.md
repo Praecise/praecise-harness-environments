@@ -12,9 +12,11 @@ connected asks. It reads no other app, and it lists no other app to an agent.
 - **Pictures and recordings** of a window are written to a folder on your computer.
   Recordings are removed after a day and are held to a size limit. Nothing here sends
   them anywhere; the agent that asked for one is given it.
-- **While a window is being pictured or recorded** on a Mac, the Praecise Control icon
-  in the menu bar turns red and its menu says so. The Windows and Linux apps do not
-  show this sign yet.
+- **While a window is being pictured or recorded**, the Praecise Control icon turns
+  red (on Linux, the system's recording icon) and its menu says so.
+- **Folders, the camera, the microphone and coding agents** are off until you name
+  them. A picture or sound taken is passed to the agent that asked and is not kept.
+  Files are read and written only inside the folders you named.
 - **Each app starts in a mode where it can only be looked at.** You change that, per
   app, and anything that sends, pays or deletes waits for you.
 - **Pause** in the menu refuses every agent until you resume. **Disconnect** ends the
