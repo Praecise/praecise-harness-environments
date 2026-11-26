@@ -8,7 +8,7 @@
 // What is not tried here is the person signing in: the computer is handed its token.
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -204,6 +204,15 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   const done = (await get(manages, `/devices/${machine}/activity`)).said.activity as { app: string; by: string | null; did: string; on: string }[];
   assert.ok(done.some((each) => each.app === app && each.did === "elements:find" && each.on === "mail"));
   assert.ok(!done.some((each) => each.app === app && each.did === "elements:click"), "what was refused here never reached the computer and is not written as done");
+  // The same list from her own command line.
+  const devices = (...words: string[]) => spawnSync(process.execPath, [FRONT, APP!, "--cloud", address, "--devices", ...words], { env: { ...process.env, PRAECISE_CONTROL_MANAGE_TOKEN: manages }, encoding: "utf8" });
+  assert.match(devices().stdout, new RegExp(`^The desk Mac  \\(linux, connected.*\\)\\n  id ${machine}\\n`));
+  assert.match(devices("activity", "the desk").stdout, /elements:find on mail/);
+  assert.match(devices("pause", machine).stdout, /paused/);
+  assert.equal((await mcp(hers, { jsonrpc: "2.0", id: 40, method: "ping" })).status, 403);
+  assert.match(devices("resume", "The desk Mac").stdout, /connected/);
+  assert.equal(devices("pause", "nothing of hers").status, 1);
+
   // She narrows the app on that computer, then withdraws it; both hold at once, and at the next renewal.
   const at = `/devices/${machine}/apps/${encodeURIComponent(app)}`;
   const acts = token({ sub: "alice", scope: "control:screen control:act", control_devices: machine, client_id: app });

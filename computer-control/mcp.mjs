@@ -3,6 +3,9 @@
 //
 //   node mcp.mjs [folder]                  speak MCP on this program's input and output
 //   node mcp.mjs [folder] --http [port]    speak MCP over HTTP on this machine only (17346 unless said)
+//   node mcp.mjs [folder] --devices [list | name <computer> <new name> | pause|resume|remove|restore <computer>
+//                          | withdraw|allow <computer> <app> | only <computer> <app> screen,act | activity <computer>]
+//                                          the person's own list of computers at the relay, and the apps allowed on each
 //   node mcp.mjs [folder] --cloud [address]
 //                                          connect this computer to Praecise Control's public route, for an
 //                                          assistant that calls from somewhere else (https://praecise-control.app.praecise.cloud unless said)
@@ -49,7 +52,7 @@ import { App, PROTOCOL_VERSION, fileVault, handleMcp, keychainVault, secretCiphe
 const VERSION = "io.modelcontextprotocol/protocolVersion";
 const args = process.argv.slice(2);
 const flag = (name) => args.indexOf(name);
-const given = args.find((each, at) => !each.startsWith("--") && !["--http", "--tools", "--call", "--cloud"].includes(args[at - 1]) && !(args[at - 2] === "--call"));
+const given = args.find((each, at) => !each.startsWith("--") && !["--http", "--tools", "--call", "--cloud"].includes(args[at - 1]) && !(args[at - 2] === "--call") && (args.indexOf("--devices") < 0 || at < args.indexOf("--devices")));
 const root = resolve(given ?? resolve(dirname(fileURLToPath(import.meta.url)), "app"));
 
 const app = await App.load({ root });
@@ -127,8 +130,10 @@ if (flag("--call") >= 0) {
   process.exit(result.isError ? 1 : 0);
 }
 
-if (flag("--cloud") >= 0) {
-  const said = args[flag("--cloud") + 1];
+// `--devices` is the person's own list at the relay: their computers, the apps allowed on each, what was asked of each.
+const managing = flag("--devices") >= 0;
+if (flag("--cloud") >= 0 || managing) {
+  const said = flag("--cloud") >= 0 ? args[flag("--cloud") + 1] : undefined;
   const address = (said && /^https?:\/\//.test(said) ? said : "https://praecise-control.app.praecise.cloud").replace(/\/+$/, "");
   const state = join(root, ".praecise");
   mkdirSync(state, { recursive: true });
@@ -147,6 +152,10 @@ if (flag("--cloud") >= 0) {
   const note = (text) => process.stderr.write(`praecise-control: ${text}\n`);
 
   const client = `${address}/oauth/client.json`;
+  // Connecting this computer and managing the list are two sign-ins, each asked for by name and kept apart.
+  const kept = managing ? "refresh-manage" : "refresh";
+  const asks = managing ? "control:manage offline_access" : "control:host offline_access";
+  const placed = managing ? process.env.PRAECISE_CONTROL_MANAGE_TOKEN : process.env.PRAECISE_CONTROL_CLOUD_TOKEN;
   /** Where the person signs in, asked of the relay and then of the account service it names, when it is first needed. */
   let known;
   const accountService = () =>
@@ -162,7 +171,7 @@ if (flag("--cloud") >= 0) {
     const answer = await response.json();
     if (!response.ok) throw new Error(answer.error_description ?? answer.error ?? `the account service answered ${response.status}`);
     // A sign-in is renewed with something that is replaced each time it is used.
-    if (answer.refresh_token) await vault.put("refresh", answer.refresh_token);
+    if (answer.refresh_token) await vault.put(kept, answer.refresh_token);
     return { token: answer.access_token, until: Date.now() + (answer.expires_in ?? 600) * 1000 };
   };
 
@@ -175,15 +184,15 @@ if (flag("--cloud") >= 0) {
       const back = createServer((request, response) => {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         if (url.pathname !== "/callback") return response.writeHead(404).end();
-        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(url.searchParams.get("code") ? "This computer is connected to Praecise Control. You can close this page." : "Praecise Control was not connected.");
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(url.searchParams.get("code") ? "Signed in to Praecise Control. You can close this page." : "Praecise Control was not signed in to.");
         back.close();
         if (url.searchParams.get("state") !== state || !url.searchParams.get("code")) return failed(new Error(url.searchParams.get("error_description") ?? "the sign-in was not finished"));
         exchange({ grant_type: "authorization_code", code: url.searchParams.get("code"), code_verifier: verifier, redirect_uri: `http://127.0.0.1:${back.address().port}/callback` }).then(done, failed);
       });
       back.listen(0, "127.0.0.1", () => {
         const page = new URL(account.authorization_endpoint);
-        for (const [key, value] of Object.entries({ response_type: "code", client_id: client, redirect_uri: `http://127.0.0.1:${back.address().port}/callback`, scope: "control:host offline_access", resource: address, state, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) page.searchParams.set(key, value);
-        note(`sign in to connect this computer: ${page.href}`);
+        for (const [key, value] of Object.entries({ response_type: "code", client_id: client, redirect_uri: `http://127.0.0.1:${back.address().port}/callback`, scope: asks, resource: address, state, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) page.searchParams.set(key, value);
+        note(`sign in to ${managing ? "manage your computers" : "connect this computer"}: ${page.href}`);
         const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
         execFile(opener, [page.href], () => undefined);
       });
@@ -194,19 +203,70 @@ if (flag("--cloud") >= 0) {
   /** A token of the person's own for this computer, renewed when it is close to running out. */
   const token = async () => {
     // A token placed here by whoever runs this unattended is used as it is.
-    if (process.env.PRAECISE_CONTROL_CLOUD_TOKEN) return process.env.PRAECISE_CONTROL_CLOUD_TOKEN;
+    if (placed) return placed;
     if (held && held.until - Date.now() > 60_000) return held.token;
-    const refresh = await vault.get("refresh");
+    const refresh = await vault.get(kept);
     try {
       held = refresh ? await exchange({ grant_type: "refresh_token", refresh_token: refresh }) : await signIn();
     } catch (err) {
       if (!refresh) throw err;
       note(`the sign-in kept here is no longer good (${err.message}); signing in again`);
-      await vault.delete("refresh");
+      await vault.delete(kept);
       held = await signIn();
     }
     return held.token;
   };
+
+  if (managing) {
+    const [verb = "list", which, ...rest] = args.slice(flag("--devices") + 1).filter((each, at, all) => each !== "--cloud" && all[at - 1] !== "--cloud");
+    const ask = async (method, path, body) => {
+      const response = await fetch(`${address}${path}`, { method, headers: { authorization: `Bearer ${await token()}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const answer = await response.json();
+      if (!response.ok) throw new Error(answer.error ?? `the relay answered ${response.status}`);
+      return answer;
+    };
+    const ago = (seconds) => {
+      const since = Math.max(0, Math.floor(Date.now() / 1000) - seconds);
+      return since < 90 ? "just now" : since < 5400 ? `${Math.round(since / 60)} minutes ago` : since < 129_600 ? `${Math.round(since / 3600)} hours ago` : `${Math.round(since / 86_400)} days ago`;
+    };
+    const show = ({ devices }) => {
+      if (!devices.length) return process.stdout.write("No computer of yours has connected to Praecise Control yet. Get it at https://control.praecise.com\n");
+      for (const each of devices) {
+        const state = each.removed ? "removed" : each.paused ? "paused" : each.connected ? "connected" : `last connected ${ago(each.last_connected)}`;
+        process.stdout.write(`${each.name}  (${each.system}, ${state}${each.in_use_by ? `, in use by ${each.in_use_by}` : ""})\n  id ${each.id}\n`);
+        for (const app of each.apps ?? []) process.stdout.write(`  ${app.app}: ${app.withdrawn ? "withdrawn" : `only ${app.only ? app.only.join(", ") : "what it was allowed"}${app.until ? `, until ${new Date(app.until * 1000).toISOString()}` : ""}`}\n`);
+      }
+    };
+    try {
+      const all = await ask("GET", "/devices");
+      if (verb === "list") show(all);
+      else {
+        // A computer is named by its id, or by its name or the start of it.
+        const found = all.devices.filter((each) => each.id === which || each.name.toLowerCase().startsWith(String(which ?? "\u0000").toLowerCase()));
+        if (found.length !== 1) throw new Error(found.length ? `"${which}" is more than one of your computers; use an id` : `"${which ?? ""}" is not a computer of yours`);
+        const at = `/devices/${encodeURIComponent(found[0].id)}`;
+        const app = () => {
+          if (!rest[0]) throw new Error("name the app, as the list shows it");
+          return `${at}/apps/${encodeURIComponent(rest[0])}`;
+        };
+        if (verb === "name") show(await ask("PATCH", at, { name: rest.join(" ") }));
+        else if (verb === "pause" || verb === "resume") show(await ask("PATCH", at, { paused: verb === "pause" }));
+        else if (verb === "remove") show(await ask("DELETE", at));
+        else if (verb === "restore") show(await ask("PATCH", at, { removed: false }));
+        else if (verb === "withdraw") show(await ask("DELETE", app()));
+        else if (verb === "allow") show(await ask("PUT", app(), {}));
+        else if (verb === "only") show(await ask("PUT", app(), { only: String(rest[1] ?? "").split(",").filter(Boolean) }));
+        else if (verb === "activity") {
+          const { activity } = await ask("GET", `${at}/activity`);
+          process.stdout.write(activity.length ? `${activity.map((each) => `${new Date(each.at * 1000).toISOString()}  ${each.app}${each.by ? ` (${each.by})` : ""}  ${each.did}${each.on ? ` on ${each.on}` : ""}`).join("\n")}\n` : "Nothing has been asked of it.\n");
+        } else throw new Error("after --devices: list, name, pause, resume, remove, restore, withdraw, allow, only or activity");
+      }
+      process.exit(0);
+    } catch (err) {
+      note(err.message);
+      process.exit(1);
+    }
+  }
 
   let wait = 1000;
   const connect = async () => {
