@@ -12,13 +12,13 @@ out=${1:-"$here/build"}
 # From nothing every time: a build on top of an earlier one has been seen to sign a part with nothing it is entitled to.
 rm -rf "$out"
 cd "$here/Praecise Control for Safari"
-# No debugging entitlement in what is signed: an app with one is not notarized.
 nice -n 20 xcodebuild -project "Praecise Control for Safari.xcodeproj" -scheme "Praecise Control for Safari" -configuration Release \
   -derivedDataPath "$out" -jobs 1 DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGN" \
-  CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS="--timestamp" build -quiet
+  OTHER_CODE_SIGN_FLAGS="--timestamp" build -quiet
 app="$out/Build/Products/Release/Praecise Control for Safari.app"
-# A build leaves the entitlement that lets a debugger in, whatever it is told. It is taken out and each part
-# signed again, the extension before the app that holds it.
+# A build leaves the entitlement that lets a debugger in, and an app with it is not notarized. Telling the
+# build to leave it out leaves out the sandbox as well, so it is taken out here and each part signed again,
+# the extension before the app that holds it.
 held=$(mktemp -d)
 trap 'rm -rf "$held"' EXIT
 # Both are read before either is signed again: signing the extension changes what the app's own signature covers.
