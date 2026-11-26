@@ -7,9 +7,10 @@
   "exports": {
     "./apple-development": "./apple-development/index.ts",
     "./apple": "./apple-development/index.ts",
-    "./meta-marketing": "./meta-marketing/index.ts"
+    "./meta-marketing": "./meta-marketing/index.ts",
+    "./computer-control": "./computer-control/index.ts"
   },
-  "files": ["apple-development", "meta-marketing", "README.md", "LICENSE"],
+  "files": ["apple-development", "meta-marketing", "computer-control", "README.md", "LICENSE"],
   "peerDependencies": {
     "@praecise/harness": ">=1.2.1"
   }

@@ -1,0 +1,6 @@
+{
+  "name": "computer-control",
+  "description": "Computer control environment for Claude by Praecise: work the apps on a Mac, a Windows or a Linux machine by reading their windows as elements and pressing by reference.",
+  "version": "0.3.0",
+  "author": { "name": "Praecise" }
+}
