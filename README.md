@@ -119,3 +119,14 @@ Rules every environment here keeps:
 ## License
 
 Apache-2.0
+
+## Tests
+
+```sh
+node --test --test-concurrency=1 tests/*.test.ts
+```
+
+One file at a time: the tests that drive a real browser listen on the one port the
+extensions look for. Those, and the tests that need a real app, run only where a
+browser or a helper is named, and say how at the top of each file.
+
