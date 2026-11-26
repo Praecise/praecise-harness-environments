@@ -1,0 +1,9 @@
+{
+  "name": "praecise-control-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@praecise/harness": ">=1.2.1",
+    "@praecise/harness-environments": "file:../.."
+  }
+}
