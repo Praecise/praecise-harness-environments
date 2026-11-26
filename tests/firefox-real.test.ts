@@ -41,7 +41,7 @@ test("Firefox: a page is read and worked from inside it", { skip: !GECKODRIVER }
   execFileSync("python3", ["-m", "zipfile", "-c", join(work, "extension.xpi"), "manifest.json", "background.js", "page.js", "popup.html", "popup.js", "icons"], { cwd: folder });
 
   const port = 4500 + Math.floor(Math.random() * 400);
-  const driver = spawn(GECKODRIVER!, ["--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] });
+  const driver = spawn(GECKODRIVER!, ["--port", String(port), "--allow-system-access"], { stdio: ["ignore", "pipe", "pipe"] });
   let session = "";
   const wd = async (method: string, path: string, body?: unknown): Promise<any> => {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }) });
@@ -74,9 +74,17 @@ test("Firefox: a page is read and worked from inside it", { skip: !GECKODRIVER }
   await wd("POST", `${at}/moz/addon/install`, { addon: (await readFile(join(work, "extension.xpi"))).toString("base64"), temporary: true });
   await wd("POST", `${at}/url`, { url: `${origin}/` });
   const page = await wd("GET", `${at}/window`);
-  const popup = (await wd("POST", `${at}/window/new`, { type: "tab" })).handle;
+  // The extension's own page cannot be gone to as a web page is. It is opened the way the browser opens it.
+  const before = (await wd("GET", `${at}/window/handles`)) as string[];
+  await wd("POST", `${at}/moz/context`, { context: "chrome" });
+  await wd("POST", `${at}/execute/sync`, {
+    script: "gBrowser.selectedTab = gBrowser.addTab(arguments[0], { triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal() });",
+    args: [`moz-extension://${UUID}/popup.html`],
+  });
+  await wd("POST", `${at}/moz/context`, { context: "content" });
+  const popup = ((await wd("GET", `${at}/window/handles`)) as string[]).find((each) => !before.includes(each))!;
   await wd("POST", `${at}/window`, { handle: popup });
-  await wd("POST", `${at}/url`, { url: `moz-extension://${UUID}/popup.html` });
+  await wd("POST", `${at}/execute/async`, { script: "const done = arguments[arguments.length - 1]; (function wait() { document.querySelector('#heading').textContent ? done(true) : setTimeout(wait, 50); })();", args: [] });
   const offered = await wd("POST", `${at}/execute/async`, {
     script: `const done = arguments[arguments.length - 1]; browser.tabs.query({}).then((all) => browser.runtime.sendMessage({ type: "offer", tabId: all.find((tab) => (tab.url || "").startsWith(arguments[0])).id })).then(done, (err) => done({ ok: false, error: String(err) }));`,
     args: [origin],
