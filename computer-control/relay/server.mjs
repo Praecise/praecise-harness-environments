@@ -195,7 +195,9 @@ function note(person, device, app, by, message) {
 // What a token may allow on a computer, and which of those a request needs.
 
 /** Each thing that can be allowed on a computer, by the permission that allows it. */
-const INPUTS = { "control:screen": "screen", "control:act": "act", "control:record": "record" };
+const INPUTS = { "control:screen": "screen", "control:act": "act", "control:record": "record", "control:files": "files", "control:code": "code", "control:camera": "camera", "control:microphone": "microphone" };
+/** What the older single permission allows: the apps' windows, and no more. */
+const WINDOWS = ["screen", "act", "record"];
 /** Permissions a token for an assistant or an app may carry. */
 const USES = ["control:use", ...Object.keys(INPUTS)];
 const LISTS = ["control:devices", "control:manage"];
@@ -203,7 +205,7 @@ const LISTS = ["control:devices", "control:manage"];
 /** What a token's permissions allow: the older single permission allows all three. */
 function inputsOf(scope) {
   const has = String(scope ?? "").split(" ");
-  return new Set(has.includes("control:use") ? Object.values(INPUTS) : has.filter((each) => each in INPUTS).map((each) => INPUTS[each]));
+  return new Set([...(has.includes("control:use") ? WINDOWS : []), ...has.filter((each) => each in INPUTS).map((each) => INPUTS[each])]);
 }
 
 const LOOKS = { elements: ["read", "read_page", "find", "text", "get_page_text"], screen: ["screenshot", "zoom", "cursor_position", "wait"] };
@@ -218,6 +220,7 @@ function needs(message) {
     if (tool === "accounts") all.add("screen");
     else if (tool === "record") all.add("record");
     else if (tool === "open") all.add("act");
+    else if (tool === "files" || tool === "code" || tool === "camera" || tool === "microphone") all.add(tool);
     else if (tool in LOOKS) all.add(LOOKS[tool].includes(action) ? "screen" : "act");
     else for (const input of Object.values(INPUTS)) all.add(input);
   }
@@ -231,6 +234,7 @@ const named = (said) => [...new Set([...String(said.control_devices ?? "").split
 function allowed(said, device) {
   const record = kept[said.sub];
   if (record?.devices[device]?.removed) throw new Refused(403, "that computer was removed from Praecise Control by its person");
+  if (record?.devices[device]?.paused) throw new Refused(403, "that computer is paused by its person");
   const limit = record?.limits[device]?.[said.client_id];
   if (limit?.off) throw new Refused(403, "this app's use of that computer was withdrawn by its person");
   const until = Math.min(Number(said.control_until) > 0 ? Number(said.control_until) : Infinity, limit?.until ?? Infinity);
@@ -432,6 +436,7 @@ function listed(said) {
     const live = computers.get(id);
     const one = { id, name: each.name, system: each.system, connected: Boolean(live), first_connected: each.first, last_connected: live ? Math.floor(now / 1000) : each.last };
     if (each.removed) one.removed = true;
+    if (each.paused) one.paused = true;
     const busy = live?.using && now - live.using.at < 30_000 ? live.using : undefined;
     // What this app may do there. A computer it was not allowed is listed by name only.
     if (mine.includes(id) && inputsOf(said.scope).size) {
@@ -484,6 +489,9 @@ function manage(said, method, parts, body) {
       const live = people.get(said.sub)?.get(id);
       if (live) live.name = name;
     }
+    // Paused, a computer stays connected and listed, and every app is refused until it is resumed.
+    if (put.paused === true) device.paused = true;
+    else if (put.paused === false) delete device.paused;
     if (put.removed === true) {
       device.removed = true;
       people.get(said.sub)?.get(id)?.end();

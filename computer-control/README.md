@@ -195,6 +195,42 @@ an app from the Store that is shown inside another process's frame is not.
 Tried against a Windows Forms app in the signed-in session with
 `tests/fixtures/windows-check.ps1`: 28 checks.
 
+## Folders, coding agents, the camera and the microphone
+
+Beside its apps, a machine has other things a person may allow. Each is turned on by
+name in the config, is listed as an account of its own, starts in read mode, and is
+held to what is asked, the same as an app.
+
+```ts
+computerControl({
+  apps: ["TextEdit"],              // or ["*"] for every app, each still an account of its own
+  folders: ["~/Documents/reports"],
+  coding: { folders: ["~/dev/site"] },
+  camera: true,
+  microphone: true,
+});
+```
+
+| Tool | What it does | What waits for a person |
+|---|---|---|
+| `computer_control_files` | Lists, reads, writes and deletes inside a folder you named. A path that leaves the folder, by `..` or through a link, is refused | Writing, unless you said writes there need no asking. Deleting, always |
+| `computer_control_code` | Starts Claude Code or Codex in a folder you named for it, says how a session is doing, gives a finished one its next request, stops one | Each request to the agent, unless you said they need no asking there |
+| `computer_control_camera` | One picture from the camera. Nothing is kept | Nothing: it is there only if you turned it on |
+| `computer_control_microphone` | A few seconds of sound, at most 60. Nothing is kept | Nothing: it is there only if you turned it on |
+
+A coding agent is started as its own command line says to run it without its
+interface (`claude -p`, `codex exec`), in the folder, with the request written to its
+input. It runs with the permissions you set for it on that machine, and Praecise
+Control adds none. `coding.agents` names other agents, or other arguments for these.
+
+The camera and the microphone are read through FFmpeg, which must be installed. On a
+Mac the system asks once whether the program that starts Praecise Control may use
+them, and shows its own sign while they are in use.
+
+In the ready app (`app/`), the same things are set by `PRAECISE_CONTROL_FOLDERS`,
+`PRAECISE_CONTROL_CODE`, `PRAECISE_CONTROL_CAMERA=1` and
+`PRAECISE_CONTROL_MICROPHONE=1`.
+
 ## Recording
 
 `computer_control_record` records one app's window as video and gives back pictures
@@ -391,13 +427,17 @@ token for the same person finds it.
 | `control:screen` | Reading the windows of the allowed apps as elements, and pictures of them |
 | `control:act` | Pressing, filling, typing, the pointer and the keys, and opening an allowed app |
 | `control:record` | Recording a window |
-| `control:use` | All three at once |
+| `control:use` | Those three at once, and nothing below |
+| `control:files` | Reading and writing in the folders allowed on the computer |
+| `control:code` | A coding agent at work in the folders allowed for it |
+| `control:camera` | A picture from the camera |
+| `control:microphone` | A few seconds from the microphone |
 | `control:devices` | The names of the person's computers, and whether each is connected |
 | `control:manage` | Naming or removing a computer, and narrowing or withdrawing an app on one |
 
 The app names the computers in `control_devices` (ids separated by full stops) and may
 set `control_until`, a time after which the permission is over. With no computer named,
-the consent page offers the person's computers and they pick one. The relay is asked
+the consent page offers the person's computers and they tick one or more. The relay is asked
 again each time a token is renewed, and tokens last ten minutes.
 
 Each press is still held by the app's mode on the computer itself. A permission here
@@ -408,7 +448,7 @@ relay and never reaches the computer.
 |---|---|---|
 | `GET /devices` | any permission above | The person's computers: `id`, `name`, `system`, `connected`, when each was last connected; for a computer this app was allowed, `allowed`, `until` and `in_use`. With none yet, `get` is where Praecise Control is downloaded |
 | `POST /mcp/<id>` | `control:screen`, `control:act`, `control:record` or `control:use` | MCP, to that computer. `/mcp` alone when the token names one computer |
-| `PATCH /devices/<id>` | `control:manage` | `{"name": "..."}`, or `{"removed": false}` to restore one |
+| `PATCH /devices/<id>` | `control:manage` | `{"name": "..."}`; `{"paused": true}` refuses every app until `false`; `{"removed": false}` restores one |
 | `DELETE /devices/<id>` | `control:manage` | Removes a computer: it is disconnected and refused to every app until restored |
 | `PUT /devices/<id>/apps/<app>` | `control:manage` | `{"only": ["screen"], "until": 1790000000}` narrows an app there; `{"withdrawn": true}` withdraws it |
 | `DELETE /devices/<id>/apps/<app>` | `control:manage` | Withdraws an app from that computer. It holds at once, and stays until allowed again |

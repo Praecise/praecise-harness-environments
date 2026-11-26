@@ -86,7 +86,7 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
 
   // What it says of itself.
   const about = (await (await fetch(`${address}/.well-known/oauth-protected-resource`)).json()) as Record<string, unknown>;
-  assert.deepEqual([about.resource, about.authorization_servers, about.scopes_supported], [address, [issuer], ["control:use", "control:screen", "control:act", "control:record", "control:devices", "control:manage"]]);
+  assert.deepEqual([about.resource, about.authorization_servers, about.scopes_supported], [address, [issuer], ["control:use", "control:screen", "control:act", "control:record", "control:files", "control:code", "control:camera", "control:microphone", "control:devices", "control:manage"]]);
   assert.equal(((await (await fetch(`${address}/oauth/client.json`)).json()) as { client_id: string }).client_id, `${address}/oauth/client.json`);
 
   // Nobody gets in without a token of the account service's, for this relay, that allows it.
@@ -167,6 +167,21 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   const narrowed = (await (await mcp(hers, call(23, "computer_control_elements", { app: "mail", action: "click", ref: "e3" }), { "praecise-control-only": "screen", "praecise-control-actor": "helper-one" }, `/mcp/${machine}`)).json()) as { error: { data: { needs: string[] } } };
   assert.deepEqual(narrowed.error.data.needs, ["act"]);
   assert.equal((await mcp(hers, { jsonrpc: "2.0", id: 24, method: "ping" }, {}, `/mcp/${"z".repeat(12)}`)).status, 403);
+  // Files, a coding agent, the camera and the microphone are each allowed by name, and not by the older permission.
+  assert.deepEqual(((await (await mcp(hers, call(30, "computer_control_files", { folder: "work", action: "list" }))).json()) as { error: { data: { needs: string[] } } }).error.data.needs, ["files"]);
+  assert.deepEqual(((await (await mcp(sees, call(31, "computer_control_code", { workspace: "work-code", action: "list" }))).json()) as { error: { data: { needs: string[] } } }).error.data.needs, ["code"]);
+  const films = token({ sub: "alice", scope: "control:camera", control_devices: machine, client_id: app });
+  assert.deepEqual(((await (await mcp(films, call(32, "computer_control_microphone", { microphone: "microphone" }))).json()) as { error: { data: { needs: string[] } } }).error.data.needs, ["microphone"]);
+  // With the permission it reaches the computer, which has no camera turned on and says so itself.
+  assert.ok(((await (await mcp(films, call(33, "computer_control_camera", { camera: "camera" }))).json()) as { error?: { code: number }; result?: unknown }).error?.code !== -32002);
+  // Paused by its person, the computer refuses every app until resumed.
+  const pauses = token({ sub: "alice", scope: "control:manage" });
+  const set = (body: unknown) => fetch(`${address}/devices/${machine}`, { method: "PATCH", headers: { authorization: `Bearer ${pauses}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+  assert.equal(((await (await set({ paused: true })).json()) as { devices: { paused?: boolean }[] }).devices[0]!.paused, true);
+  assert.equal((await mcp(hers, { jsonrpc: "2.0", id: 34, method: "ping" })).status, 403);
+  assert.equal(((await (await set({ paused: false })).json()) as { devices: { paused?: boolean }[] }).devices[0]!.paused, undefined);
+  assert.equal((await mcp(hers, { jsonrpc: "2.0", id: 35, method: "ping" })).status, 200);
+
   // A time that has passed ends it.
   assert.equal((await mcp(token({ sub: "alice", scope: "control:use", control_devices: machine, control_until: String(Math.floor(Date.now() / 1000) - 5) }), { jsonrpc: "2.0", id: 25, method: "ping" })).status, 403);
   assert.equal((await hook({ account: alice, client_id: app, scopes: ["control:screen"], resource: address, requested: { control_devices: machine, control_until: "1000000000" } })).said.error, "access_denied");
@@ -179,6 +194,7 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
     const response = await fetch(`${address}${at}`, { method, headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, said: (await response.json()) as Record<string, any> };
   };
+  await mcp(sees, call(36, "computer_control_elements", { app: "mail", action: "find", query: "send" }));
   const seen = (await get(sees, "/devices")).said.devices as Record<string, any>[];
   assert.deepEqual([seen.length, seen[0]!.id, seen[0]!.connected, seen[0]!.allowed, seen[0]!.in_use], [1, machine, true, ["screen"], true]);
   assert.equal((await get(sees, `/devices/${machine}`, "PATCH", { name: "Not hers to name" })).status, 403);
