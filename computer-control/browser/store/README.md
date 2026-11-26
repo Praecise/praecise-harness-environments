@@ -45,6 +45,13 @@ Every store asks the same things in different boxes. These are the answers.
 They are drawn from the extension's own popup by `shots.html`, which says at its top
 how. Draw them again when the popup changes.
 
+## The ids the stores gave
+
+| Store | Id |
+|---|---|
+| Chrome Web Store | `poeldkafjajjccepncedipahlmlaimkm` |
+| Firefox | `control@praecise.com`, from the manifest; listed as `praecise-control` |
+
 ## The id, once a store gives one
 
 A store gives the extension its own id, which is not the id the unpacked build has.

@@ -27,7 +27,11 @@ import { appScreen, type Helper } from "./index.ts";
 /** The extension's id as it is built from this repository, which follows from the key in its manifest. */
 export const EXTENSION = "aadpnkpndmkmccflljbpklaiehkhjekb";
 /** Every id the extension is known by: the one above, and the one each store gave it when it was published there. */
-export const EXTENSIONS: readonly string[] = [EXTENSION];
+export const EXTENSIONS: readonly string[] = [
+  EXTENSION,
+  // The Chrome Web Store's id for it.
+  "poeldkafjajjccepncedipahlmlaimkm",
+];
 /** The port the extension looks for an agent on. */
 export const PORT = 17345;
 
