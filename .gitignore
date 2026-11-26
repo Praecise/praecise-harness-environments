@@ -9,3 +9,5 @@ apple.env
 computer-control/helpers/macos/praecise-computer-helper
 computer-control/helpers/windows/praecise-computer-helper.exe
 __pycache__/
+xcuserdata/
+*.xcuserstate
