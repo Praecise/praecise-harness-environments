@@ -63,7 +63,9 @@ It needs the Praecise Control program on the same Mac, which is free and open so
 
 agent,automation,MCP,browser,extension,developer,accessibility,assistant
 
-**Support URL:** https://github.com/Praecise/praecise-harness-environments/issues
+**Support URL:** https://praecise.com
+
+**Support email:** contact@praecise.com
 
 **Marketing URL:** https://control.praecise.com
 

@@ -15,7 +15,7 @@ Package: `out/chrome.zip`, the same one the Chrome Web Store is given.
 
 **Website URL:** https://control.praecise.com
 
-**Support contact:** https://github.com/Praecise/praecise-harness-environments/issues
+**Support contact:** contact@praecise.com
 
 **Mature content:** No
 

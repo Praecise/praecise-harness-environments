@@ -22,10 +22,10 @@ Every store asks the same things in different boxes. These are the answers.
 - **Name:** Praecise Control
 - **Short description:** Lets an AI agent on your own computer use one tab you offer it, on the site it is on, until you stop it.
 - **Single purpose:** Let a person offer one browser tab to an agent running on their own computer, and take it back.
-- **Category:** Developer tools (Chrome, Edge); Other, tagged automation (Firefox); Developer Tools (Mac App Store).
+- **Category:** Developer tools (Chrome, Edge); Tabs and Web Development (Firefox); Developer Tools (Mac App Store).
 - **Language:** English.
 - **Homepage:** https://control.praecise.com
-- **Support:** https://github.com/Praecise/praecise-harness-environments/issues
+- **Support:** contact@praecise.com, https://praecise.com
 - **Privacy policy:** https://control.praecise.com/docs/privacy/
 - **Licence:** Apache-2.0
 - **Publisher:** Praecise LTD

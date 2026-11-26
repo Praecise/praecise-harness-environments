@@ -50,7 +50,9 @@ Privacy: https://control.praecise.com/docs/privacy/
 
 **Homepage URL:** https://control.praecise.com
 
-**Support URL:** https://github.com/Praecise/praecise-harness-environments/issues
+**Support URL:** https://praecise.com
+
+**Support email:** contact@praecise.com
 
 **Mature content:** No
 

@@ -38,7 +38,7 @@ Lets an AI agent on your own computer use the tab you offer it, on the site it i
 
 Praecise Control lets an AI agent running on your own computer use one browser tab that you offer it.
 
-You stay in charge of which tab. Open the extension on a tab, press its button on the tab you choose, and the agent can read that page and work it: click, type, scroll and take a picture of it. It can do this only on the site the tab was on when you offered it. When you press Stop, close the tab, or the tab leaves that site, the agent is cut off.
+You stay in charge of which tab. Press the extension's button on a tab, then "Use this tab", and the agent can read that page and work it: click, type, scroll and take a picture of it. It can do this only on the site the tab was on when you offered it. When you press Stop, close the tab, or the tab leaves that site, the agent is cut off.
 
 What it is for
 - Letting an agent you run yourself (Claude Code, Codex, or any agent that speaks the Model Context Protocol) do a piece of work in a site you are already signed in to, without giving it your password.
@@ -60,9 +60,11 @@ Privacy: https://control.praecise.com/docs/privacy/
 
 **This add-on requires payment, non-free services or software, or additional hardware:** No. It needs the Praecise Control program, which is free and open source.
 
-**Categories:** Other; Web Development
+**Categories:** Tabs; Web Development
 
-**Support website:** https://github.com/Praecise/praecise-harness-environments/issues
+**Support email:** contact@praecise.com
+
+**Support website:** https://praecise.com
 
 **Homepage:** https://control.praecise.com
 
@@ -72,7 +74,7 @@ Privacy: https://control.praecise.com/docs/privacy/
 
 **Privacy policy**
 
-Praecise Control does nothing until you press its button on a tab. It then passes that page's content, and input for it, between that tab and the Praecise Control program on your own computer, at 127.0.0.1, until you stop it, the tab closes or it leaves the site. It does not read your other tabs or your history. It collects nothing, and nothing is sent to Praecise or to anyone else. Full text: https://control.praecise.com/docs/privacy/
+Praecise Control does nothing until you press its button on a tab. It then passes that page's content, and input for it, between that tab and the Praecise Control program on your own computer, at 127.0.0.1, until you stop it, the tab closes or it leaves the site. It does not read your other tabs or your history. It collects nothing, and nothing is sent to Praecise or to anyone else. It has no analytics and no advertising. Full text: https://control.praecise.com/docs/privacy/
 
 **Screenshots:** `images/offer.png`, `images/using.png`
 
