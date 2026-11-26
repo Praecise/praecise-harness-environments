@@ -142,6 +142,30 @@ const edition = (() => {
   return JSON.parse(readFileSync(new URL(`./editions/${id}.json`, import.meta.url), "utf8"));
 })();
 
+/**
+ * The page a person lands on in their browser after signing in, in the edition's own colours, type and mark.
+ * Everything else a person sees of this program is the system's own menu.
+ */
+function landing(title, line) {
+  const theme = edition.theme ?? {};
+  const colour = (value, otherwise) => (/^#[0-9a-fA-F]{3,8}$/.test(String(value ?? "")) ? value : otherwise);
+  const text = (value) => String(value ?? "").replace(/[&<>"]/g, (each) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[each]);
+  const ground = colour(theme.ground, "#edf0f2");
+  const card = colour(theme.card, "#ffffff");
+  const ink = colour(theme.ink, "#26333a");
+  const soft = colour(theme.soft, "#56666f");
+  const rule = colour(theme.rule, "#d9dfe3");
+  // The mark is drawn from the edition's own file and from nothing a page or a person sent.
+  const mark = typeof theme.mark === "string" && theme.mark.startsWith("<svg") ? theme.mark : "";
+  const face = /^[\w ,"'-]{1,160}$/.test(String(theme.font ?? "")) ? theme.font : 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${text(edition.name)}</title>
+<style>html,body{height:100%;margin:0}body{background:${ground};color:${ink};font:16px/1.5 ${face};display:flex;align-items:center;justify-content:center}
+main{background:${card};border:1px solid ${rule};border-radius:${Number(theme.radius) >= 0 ? Number(theme.radius) : 16}px;padding:36px 40px;max-width:440px;margin:24px}
+svg{width:44px;height:44px;display:block;margin-bottom:22px}h1{font-size:22px;line-height:1.25;margin:0 0 8px;font-weight:650;letter-spacing:-.01em;text-wrap:balance}
+p{margin:0;color:${soft}}small{display:block;margin-top:26px;color:${soft};font-size:13px}</style>
+<main>${mark}<h1>${text(title)}</h1><p>${text(line)}</p>${edition.by ? `<small>${text(edition.by)}</small>` : ""}</main></html>`;
+}
+
 // `--devices` is the person's own list at the relay: their computers, the apps allowed on each, what was asked of each.
 const managing = flag("--devices") >= 0;
 if (flag("--cloud") >= 0 || managing) {
@@ -203,7 +227,10 @@ if (flag("--cloud") >= 0 || managing) {
       const back = createServer((request, response) => {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         if (url.pathname !== "/callback") return response.writeHead(404).end();
-        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(url.searchParams.get("code") ? `Signed in to ${edition.name}. You can close this page.` : `${edition.name} was not signed in to.`);
+        const worked = Boolean(url.searchParams.get("code"));
+        response
+          .writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'" })
+          .end(worked ? landing(managing ? `Signed in to ${edition.name}.` : (edition.wording?.done ?? `This computer is connected to ${edition.name}.`), "You can close this page.") : landing(`${edition.name} was not signed in to.`, "Nothing was connected. You can close this page and try again from the app."));
         back.close();
         if (url.searchParams.get("state") !== state || !url.searchParams.get("code")) return failed(new Error(url.searchParams.get("error_description") ?? "the sign-in was not finished"));
         exchange({ grant_type: "authorization_code", code: url.searchParams.get("code"), code_verifier: verifier, redirect_uri: `http://127.0.0.1:${port}/callback` }).then(done, failed);
