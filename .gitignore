@@ -6,3 +6,4 @@ apple.env
 *.mobileprovision
 *.provisionprofile
 .DS_Store
+computer-control/helpers/macos/praecise-computer-helper

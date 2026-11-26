@@ -125,7 +125,7 @@ whose role and name are known can.
 |---|---|---|
 | 1. Element channel in `Screen` and `browserScreen` | Built in the harness as `elements(screen)`: read, find, text, click, hover, fill, scroll to, what changed after each action, stale references refused. Checked against a real Chromium | An endpoint's own browser toolset is not declared natively yet; it also wants tabs |
 | 2. This environment | Built against a stand-in helper: apps as accounts, the three modes, each press classified, the protocol in PROTOCOL.md | The words that classify a press are English |
-| 3. macOS helper | Not started | Background input is app dependent; public API only; signed, because permissions attach to the signature |
+| 3. macOS helper | Written, `helpers/macos/main.swift`. Reading, references, refusing an unknown reference, a window picture and a zoom checked on a Mac. Pressing, filling, typing and the pointer not yet tried against an app; not signed | Background input is app dependent; public API only; signed, because permissions attach to the signature |
 | 4. Linux helper | Not started | Wayland compositors differ; refuse rather than fall back to XTEST |
 | 5. Windows helper | Not started | UIA is the most complete tree of the three; Agent Workspace is not something to build on yet |
 | 6. Browser extension | Not started | Per-site permission from the start |

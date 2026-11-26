@@ -79,12 +79,33 @@ environment starts and speaks to in lines of JSON. [PROTOCOL.md](PROTOCOL.md) is
 a helper answers. `helper` names the command; `praecise-computer-helper` on the path
 is used otherwise.
 
+### macOS
+
+[helpers/macos](helpers/macos/) is one Swift file, for macOS 14 and later.
+
+```sh
+computer-control/helpers/macos/build.sh ~/.local/bin/praecise-computer-helper
+```
+
+It builds with one compiler job at the lowest priority, in about ten seconds. It needs
+Accessibility and Screen Recording, which macOS asks of the program that starts it: the
+terminal, or the app the harness runs in. `doctor` says which is missing.
+
+It reads elements through the Accessibility API and pictures a window through
+ScreenCaptureKit, at the window's size in points. An element is pressed by its own
+accessibility action, which moves no pointer and brings nothing to the front. Pointer
+and key events by position are posted to the app's process only; an app that ignores
+events posted that way is not reached another way. An app's menu bar is not read.
+
 ## What is not done
 
-- **No helper is in this repository yet.** The environment is tested against a
-  stand-in. The three to write, and what each rests on, are in
-  [FRONTIER.md](FRONTIER.md): macOS (Accessibility and ScreenCaptureKit), Linux
-  (AT-SPI, and the RemoteDesktop portal on Wayland) and Windows (UI Automation).
+- **Only the macOS helper is written.** It has read real windows, kept its references
+  across readings, refused one it never gave, and pictured and zoomed a window. Its
+  pressing, filling, typing and pointer have not been tried against an app, and it is
+  not signed. The environment's own tests run against a stand-in.
+- **Linux and Windows helpers are not written.** What each rests on is in
+  [FRONTIER.md](FRONTIER.md): AT-SPI and the RemoteDesktop portal on Wayland, and UI
+  Automation.
 - **It needs a harness later than 1.2.1**, for `elements()` and for an action whose
   kind depends on the call. Both are on the harness's main branch and not on npm.
 - **The person's signed-in browser.** A page in the browser the harness starts is read
