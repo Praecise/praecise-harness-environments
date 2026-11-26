@@ -204,8 +204,9 @@ if (flag("--cloud") >= 0) {
   const connect = async () => {
     let socket;
     try {
-      socket = new WebSocket(`${address.replace(/^http/, "ws")}/host`);
+      // The token first: signing in can take a person a while, and the line is opened once there is something to say on it.
       const mine = await token();
+      socket = new WebSocket(`${address.replace(/^http/, "ws")}/host`);
       socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "hello", token: mine, machine, name: hostname() })));
     } catch (err) {
       note(`could not connect: ${err.message}`);
