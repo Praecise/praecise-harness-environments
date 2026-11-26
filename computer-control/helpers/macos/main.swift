@@ -1105,6 +1105,8 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     add(route.status, nil, to: menu)
     add(route.wanted ? "Disconnect This Computer" : "Connect This Computer…", #selector(connect), to: menu, symbol: route.wanted ? "xmark.circle" : "link")
 
+    for link in route.links { choice(link.title, #selector(visit(_:)), link.address, on: false, in: menu, symbol: "arrow.up.forward.square") }
+
     // The apps an agent may be shown: those chosen, and those open now to choose from.
     let apps = inner("Apps", symbol: "macwindow.on.rectangle", in: menu)
     let picked = route.chosen("apps")
@@ -1135,6 +1137,7 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   @objc func connect() { Route.shared.connect(!Route.shared.wanted) }
+  @objc func visit(_ sender: NSMenuItem) { if let address = sender.representedObject as? URL { NSWorkspace.shared.open(address) } }
   @objc func app(_ sender: NSMenuItem) { if let name = sender.representedObject as? String { Route.shared.toggle("apps", name) } }
   @objc func folder(_ sender: NSMenuItem) { if let path = sender.representedObject as? String { Route.shared.toggle("folders", path) } }
   @objc func codingFolder(_ sender: NSMenuItem) { if let path = sender.representedObject as? String { Route.shared.toggle("coding", path) } }

@@ -61,6 +61,19 @@ final class Route: @unchecked Sendable {
     return (all["wording"] as? [String: Any])?[key] as? String
   }
 
+  /// Pages the edition's own app has for this computer, to open from the menu. `{device}` is this computer's name at the relay.
+  var links: [(title: String, address: URL)] {
+    guard let data = try? Data(contentsOf: edition), let all = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let listed = all["links"] as? [[String: String]] else { return [] }
+    let device = ((try? String(contentsOf: folder.appendingPathComponent(".praecise/control-machine"), encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    return listed.compactMap { each in
+      guard let title = each["title"], let written = each["url"], written.hasPrefix("https://") else { return nil }
+      // One that names this computer is offered only once this computer has a name.
+      if written.contains("{device}"), device.isEmpty { return nil }
+      guard let address = URL(string: written.replacingOccurrences(of: "{device}", with: device.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? device)) else { return nil }
+      return (title, address)
+    }
+  }
+
   // What is shown.
 
   var wanted: Bool { on("connect") }
