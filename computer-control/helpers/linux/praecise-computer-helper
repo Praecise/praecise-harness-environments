@@ -689,10 +689,27 @@ SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or os.path.expanduser("~
 
 def relay():
     """Pass this program's input to the app and the app's answers back."""
-    joined = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        joined.connect(SOCKET)
-    except OSError:
+    def dial():
+        made = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            made.connect(SOCKET)
+            return made
+        except OSError:
+            made.close()
+            return None
+
+    joined = dial()
+    if joined is None and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        # In the session already: the app is started, as it would be from its icon, and given a moment to listen.
+        flags = [flag for flag in sys.argv[1:] if flag != "connect"]
+        subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0]), "--app"] + flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        moment = threading.Event()
+        for _ in range(80):
+            moment.wait(0.1)
+            joined = dial()
+            if joined is not None:
+                break
+    if joined is None:
         sys.stderr.write("Praecise Control is not running in the desktop session; start it there with --app\n")
         sys.exit(69)
 
@@ -790,8 +807,13 @@ def app():
         menu.show_all()
 
     rebuild()
-    # What the menu says is true when it is opened.
-    menu.connect("show", lambda *_: GLib.idle_add(rebuild) and None)
+
+    def again():
+        rebuild()
+        return True
+
+    # Kept true while it is closed, so it is true when it is opened.
+    GLib.timeout_add_seconds(5, again)
     shown = False
     for library in ("AyatanaAppIndicator3", "AppIndicator3"):
         try:

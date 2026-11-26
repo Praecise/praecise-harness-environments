@@ -158,17 +158,20 @@ What the research says about distribution, and how sure it is:
 | Safari | An extension ships inside a Mac app. No debugger API | Not confirmed from Apple's pages in this pass |
 | Microsoft Store | Desktop apps are packaged as MSIX and signed by the store. Nothing found on driving other apps' windows | Microsoft Learn; the policy text was not read for this |
 
-What follows, not yet built:
+Where that stands:
 
-1. The Mac app: a menu bar app, Developer ID signed and notarized, outside the Mac App
-   Store, that holds the two permissions under its own name and carries the helper.
-2. The Windows app: a tray app in the signed-in session, which is also what removes
-   the need to start the helper there by hand.
-3. The Linux app: a tray item where the desktop has one.
-4. Safari and Firefox extensions on a different footing from Chrome's: reading the page
-   from a content script and acting through it, which is weaker than the browser's own
+1. The Mac app: built as a menu bar app for both kinds of Mac and signed with the
+   company's Developer ID. It answers through its relay. Not notarized: no notary
+   credential is stored on the Mac that built it. Its permissions have to be allowed by
+   a person from its menu.
+2. The Windows app: built as an app in the corner of the taskbar, with a relay. The
+   whole environment was run through it from another machine over SSH.
+3. The Linux app: built, with a relay that starts it. The whole environment was run
+   through it in a session of its own. Its icon was not seen: there was no panel.
+4. Safari and Firefox extensions: not started. They cannot rest on a debugger and need
+   reading and acting from a content script, which is weaker than the browser's own
    input and has to be measured before it is offered.
-5. Store listings, each with the permission justifications and a privacy statement.
+5. Store listings, installers and icons: not started.
 
 Before any of these is submitted, read the store's current policy text itself. The
 table above is not enough to submit on.

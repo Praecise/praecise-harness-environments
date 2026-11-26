@@ -72,12 +72,40 @@ The words are English. An app in another language has its commit buttons taken a
 `publish`, which still needs a person, but removing and paying are not told apart
 from it.
 
-## The helper
+## Praecise Control
 
-The machine is reached through a helper, one small program per system, which the
-environment starts and speaks to in lines of JSON. [PROTOCOL.md](PROTOCOL.md) is what
-a helper answers. `helper` names the command; `praecise-computer-helper` on the path
-is used otherwise.
+The machine is reached through Praecise Control, one small program per system. It is
+an app a person can see, in the menu bar on a Mac and in the corner of the taskbar on
+Windows and Linux. Its menu says which app an agent is using, pauses and resumes it,
+and quits it. While it is paused every request is refused.
+
+A harness does not start the app. It starts a relay, which passes what it is asked to
+the app and the app's answers back:
+
+```ts
+computerControl({
+  apps: ["TextEdit", "Numbers"],
+  helper: ["/Applications/Praecise Control.app/Contents/MacOS/praecise-control", "connect"],
+});
+```
+
+| | The app | The relay a harness starts |
+|---|---|---|
+| macOS | `Praecise Control.app`, built by `helpers/macos/build-app.sh` | `Praecise Control.app/Contents/MacOS/praecise-control connect` |
+| Windows | `praecise-control.exe`, built by `helpers\\windows\\build.cmd` | `praecise-computer-helper.exe connect` |
+| Linux | `helpers/linux/praecise-computer-helper --app` | `praecise-computer-helper connect` |
+
+The app answers on a socket or pipe that only the signed-in person's programs can
+open. On a Mac and on Linux the relay starts the app if it is not running. On Windows
+the app has to be running in the signed-in session already, which its "Start when I
+sign in" menu item arranges; a relay started over SSH or by a service then reaches it.
+
+It keeps nothing on disk but that socket. Pictures are made when asked for and handed
+back; none is stored.
+
+[PROTOCOL.md](PROTOCOL.md) is what a helper answers. Each program also still runs by
+itself, answering on its own input and output, which is what `praecise-computer-helper`
+with no arguments does.
 
 Each helper was tried against a small real app with a field, a button that saves and
 then goes, a line of text and a checkbox (`tests/fixtures`), and what each can and
@@ -97,12 +125,16 @@ cannot do is below.
 [helpers/macos](helpers/macos/) is one Swift file, for macOS 14 and later.
 
 ```sh
-computer-control/helpers/macos/build.sh ~/.local/bin/praecise-computer-helper
+SIGN="Developer ID Application: Name (TEAM)" NOTARY_PROFILE=profile \\
+  computer-control/helpers/macos/build-app.sh /Applications
 ```
 
-It builds with one compiler job at the lowest priority, in about ten seconds. It needs
-Accessibility and Screen Recording, which macOS asks of the program that starts it: the
-terminal, or the app the harness runs in. `doctor` says which is missing.
+It builds for both kinds of Mac with one compiler job each at the lowest priority. It
+is distributed outside the Mac App Store, signed with a Developer ID and notarized: an
+app that works other apps through the Accessibility API cannot be sandboxed. It needs
+Accessibility and Screen Recording, which the person allows from its menu. They are
+granted to the signed app under its own name, so they survive an update. `doctor`
+says which is missing.
 
 Tried against TextEdit kept behind another app: reading, filling, pressing a button,
 typing, single keys, a picture and a zoom all worked, and nothing was brought to the
@@ -135,8 +167,10 @@ of Windows. Nothing is installed.
 computer-control\helpers\windows\build.cmd C:\tools\praecise-computer-helper.exe
 ```
 
-It has to run in the session of whoever is signed in: one started by a service or over
-SSH can see no window, and says so. Only apps with a window of their own are listed;
+The app has to run in the session of whoever is signed in. A helper started by itself
+over SSH or by a service can see no window, and says so; started with `connect` it
+reaches the app that can. No request can hold the app: one an app does not answer in
+twenty seconds is given up on and said to be. Only apps with a window of their own are listed;
 an app from the Store that is shown inside another process's frame is not.
 
 Tried against a Windows Forms app in the signed-in session with
@@ -179,12 +213,15 @@ neither of those browsers has the debugger this one rests on.
 
 ## What is not done
 
-- **No helper is signed or packaged.** Each is built from its one file where it is used.
+- **The Mac app is signed and not notarized.** Notarizing needs a credential stored on
+  the Mac that builds it. The Windows app is not signed and has no icon of its own.
+  Nothing has an installer.
+- **The Linux icon was not seen.** It was tried where there is no panel to show it in.
 - **Wayland** has elements, pressing and filling, and no picture or pointer.
 - **Each helper was tried against one small app.** Which real apps ignore posted events,
   or describe themselves poorly to assistive technology, is not known.
-- **The Windows helper was tried by itself**, not through the environment, because the
-  environment's test starts the helper and a helper started over SSH sees no window.
+- **On a Mac the environment was not run end to end**, only the app and its relay. On
+  Windows and Linux it was, through each app.
 - **It needs a harness later than 1.2.1**, for `elements()` and for an action whose
   kind depends on the call. Both are on the harness's main branch and not on npm.
 - **Safari and Firefox extensions, and the extension in a store.**
