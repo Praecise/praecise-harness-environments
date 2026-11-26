@@ -102,9 +102,12 @@ struct Held: Hashable {
   func hash(into hasher: inout Hasher) { hasher.combine(CFHash(element)) }
 }
 struct Known { let element: AXUIElement; let app: String; let role: String; let name: String }
-var refs: [String: Known] = [:]
-var named: [Held: String] = [:]
-var counted = 0
+// What the helper knows is one set, touched by one request at a time: every request is handled on the one
+// queue (`work`) in the app, and on the one thread when it answers on its own input. Nothing below is
+// guarded by more than that, which is what `nonisolated(unsafe)` says.
+nonisolated(unsafe) var refs: [String: Known] = [:]
+nonisolated(unsafe) var named: [Held: String] = [:]
+nonisolated(unsafe) var counted = 0
 
 func ref(for element: AXUIElement, app: String, role: String, name: String) -> String {
   // A long session does not keep every element it ever saw: past this, everything is read afresh.
@@ -340,7 +343,7 @@ func screenshot(_ params: [String: Any]) throws -> Any {
 
 // MARK: Pointer and keys, posted to the app's process only
 
-var pointer: [String: CGPoint] = [:]
+nonisolated(unsafe) var pointer: [String: CGPoint] = [:]
 
 func point(_ value: Any?, in target: Target) throws -> CGPoint {
   guard let given = value as? [String: Any], let x = (given["x"] as? NSNumber)?.doubleValue, let y = (given["y"] as? NSNumber)?.doubleValue else { return try fail("a position is { x, y } in pixels of the window") }
@@ -563,10 +566,10 @@ func answer(_ method: String, _ params: [String: Any]) throws -> Any {
 // MARK: Answering
 
 /// Set from the menu. While it is, nothing but `hello` is answered.
-var paused = false
+nonisolated(unsafe) var paused = false
 /// The app an agent last asked about, and when, for the menu.
-var lastApp = ""
-var lastAsked = Date.distantPast
+nonisolated(unsafe) var lastApp = ""
+nonisolated(unsafe) var lastAsked = Date.distantPast
 
 /// One line in, one line out. Everything a helper knows is touched from here and nowhere else at once.
 func handle(_ line: String) -> String? {

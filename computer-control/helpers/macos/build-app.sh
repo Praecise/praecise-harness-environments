@@ -19,7 +19,7 @@ cp "$here/Info.plist" "$app/Contents/Info.plist"
 made=$(mktemp -d)
 trap 'rm -rf "$made"' EXIT
 for arch in arm64 x86_64; do
-  nice -n 20 xcrun swiftc -swift-version 5 -O -j 1 -target "$arch-apple-macos14.0" "$here/main.swift" -o "$made/$arch"
+  nice -n 20 xcrun swiftc -swift-version 6 -O -j 1 -target "$arch-apple-macos14.0" "$here/main.swift" -o "$made/$arch"
 done
 lipo -create "$made/arm64" "$made/x86_64" -output "$app/Contents/MacOS/praecise-control"
 if [ -n "${SIGN:-}" ]; then

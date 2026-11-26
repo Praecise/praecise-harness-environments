@@ -6,5 +6,5 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-"$here/praecise-computer-helper"}
-nice -n 20 xcrun swiftc -swift-version 5 -O -j 1 -target "$(uname -m)-apple-macos14.0" "$here/main.swift" -o "$out"
+nice -n 20 xcrun swiftc -swift-version 6 -O -j 1 -target "$(uname -m)-apple-macos14.0" "$here/main.swift" -o "$out"
 echo "$out"
