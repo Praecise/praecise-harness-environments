@@ -214,6 +214,10 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   const done = (await get(manages, `/devices/${machine}/activity`)).said.activity as { app: string; by: string | null; did: string; on: string }[];
   assert.ok(done.some((each) => each.app === app && each.did === "elements:find" && each.on === "mail"));
   assert.ok(!done.some((each) => each.app === app && each.did === "elements:click"), "what was refused here never reached the computer and is not written as done");
+  // An app reads what it asked itself, and nothing another app asked.
+  const own = (await get(sees, `/devices/${machine}/activity`)).said.activity as { app: string }[];
+  assert.ok(own.length > 0 && own.every((each) => each.app === app));
+  assert.equal((await get(token({ sub: "alice", scope: "control:screen", control_devices: "z".repeat(12), client_id: app }), `/devices/${machine}/activity`)).status, 403);
   // The same list from her own command line.
   const devices = (...words: string[]) => spawnSync(process.execPath, [FRONT, APP!, "--cloud", address, "--devices", ...words], { env: { ...process.env, PRAECISE_CONTROL_MANAGE_TOKEN: manages }, encoding: "utf8" });
   assert.match(devices().stdout, new RegExp(`^The desk Mac  \\(linux, connected.*\\)\\n  id ${machine}\\n`));

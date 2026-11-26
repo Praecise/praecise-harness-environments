@@ -494,6 +494,7 @@ relay and never reaches the computer.
 | `PUT /devices/<id>/apps/<app>` | `control:manage` | `{"only": ["screen"], "until": 1790000000}` narrows an app there; `{"withdrawn": true}` withdraws it |
 | `DELETE /devices/<id>/apps/<app>` | `control:manage` | Withdraws an app from that computer. It holds at once, and stays until allowed again |
 | `GET /devices/<id>/activity` | `control:manage` | The latest 200 things asked of that computer: when, by which app, which tool and action, on which of the computer's apps |
+| `GET /devices/<id>/activity` | a permission for that computer | The same, for an app: only what that app itself asked |
 
 Two headers are for an app that passes its permission on to helpers of its own.
 `Praecise-Control-Only: screen` holds one request to less than the app was allowed, and

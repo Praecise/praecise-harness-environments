@@ -575,6 +575,14 @@ const server = createServer((request, response) => {
           if (request.method !== "GET") return say(405, { error: "the list is read with GET" }, { allow: "GET" });
           return say(200, listed(await tokenOf(request, [...USES, ...LISTS])));
         }
+        // What was asked of a computer: all of it for its person, and for an app only what that app itself asked.
+        if (parts.length === 2 && parts[1] === "activity" && request.method === "GET") {
+          const said = await tokenOf(request, [...USES, "control:manage"]);
+          if (String(said.scope ?? "").split(" ").includes("control:manage")) return say(200, manage(said, "GET", parts, ""));
+          if (!named(said).includes(parts[0])) throw new Refused(403, "the token is not for that computer");
+          const mine = (kept[said.sub]?.activity?.[parts[0]] ?? []).filter((each) => each.app === said.client_id);
+          return say(200, { activity: [...mine].reverse() });
+        }
         return say(200, manage(await tokenOf(request, "control:manage"), request.method, parts, body));
       }
       if (path !== "/mcp" && !path.startsWith("/mcp/")) throw new Refused(404, "the address is /mcp");
