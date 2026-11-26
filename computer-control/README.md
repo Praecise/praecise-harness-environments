@@ -5,7 +5,8 @@ through its accessibility tree: each window is read as the things in it, each wi
 reference, and pressed and filled by reference. A picture and a pointer are there for
 what the list does not say.
 
-Not released. See [What is not done](#what-is-not-done).
+Downloads for each system are at [control.praecise.com](https://control.praecise.com).
+What has been tried and what has not is in [What is not done](#what-is-not-done).
 
 ## What it gives an agent
 
