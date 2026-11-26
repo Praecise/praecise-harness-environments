@@ -9,6 +9,8 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-"$here/build"}
 : "${TEAM:?TEAM is the team id}" "${SIGN:?SIGN is the Developer ID Application identity}"
+# From nothing every time: a build on top of an earlier one has been seen to sign a part with nothing it is entitled to.
+rm -rf "$out"
 cd "$here/Praecise Control for Safari"
 # No debugging entitlement in what is signed: an app with one is not notarized.
 nice -n 20 xcodebuild -project "Praecise Control for Safari.xcodeproj" -scheme "Praecise Control for Safari" -configuration Release \
@@ -19,10 +21,18 @@ app="$out/Build/Products/Release/Praecise Control for Safari.app"
 # signed again, the extension before the app that holds it.
 held=$(mktemp -d)
 trap 'rm -rf "$held"' EXIT
+# Both are read before either is signed again: signing the extension changes what the app's own signature covers.
+n=0
 for part in "$app/Contents/PlugIns/"*.appex "$app"; do
-  codesign -d --entitlements - --xml "$part" > "$held/entitlements.plist" 2>/dev/null
-  /usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" "$held/entitlements.plist" > /dev/null 2>&1 || true
-  codesign --force --options runtime --timestamp --entitlements "$held/entitlements.plist" --sign "$SIGN" "$part"
+  n=$((n + 1))
+  codesign -d --entitlements - --xml "$part" > "$held/$n.plist" 2>/dev/null
+  /usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" "$held/$n.plist" > /dev/null 2>&1 || true
+done
+n=0
+for part in "$app/Contents/PlugIns/"*.appex "$app"; do
+  n=$((n + 1))
+  [ -s "$held/$n.plist" ] || { echo "could not read what $part is entitled to" >&2; exit 1; }
+  codesign --force --options runtime --timestamp --entitlements "$held/$n.plist" --sign "$SIGN" "$part"
 done
 codesign --verify --deep --strict "$app"
 echo "$app"
