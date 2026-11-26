@@ -534,6 +534,55 @@ func frames(_ params: [String: Any]) throws -> Any {
   return ["recording": name, "seconds": (length * 10).rounded() / 10, "frames": out] as [String: Any]
 }
 
+// MARK: What is kept, and who is connected
+
+/// One program connected to the app: when it joined, and the app it last asked about.
+struct Session { let since: Date; var app = ""; var last = Date.distantPast }
+nonisolated(unsafe) var sessions: [Int32: Session] = [:]
+/// The connection whose request is being answered, or none when it answers on its own input.
+nonisolated(unsafe) var asking: Int32 = -1
+
+func kept() -> [(name: String, bytes: Int, at: Date)] {
+  let manager = FileManager.default
+  return ((try? manager.contentsOfDirectory(atPath: RECORDINGS.path)) ?? []).compactMap { name in
+    guard let known = try? manager.attributesOfItem(atPath: RECORDINGS.appendingPathComponent(name).path), let at = known[.modificationDate] as? Date, let size = (known[.size] as? NSNumber)?.intValue else { return nil }
+    return (name, size, at)
+  }.sorted { $0.at > $1.at }
+}
+
+func storage() -> Any {
+  let all = kept()
+  return [
+    "folder": RECORDINGS.path, "bytes": all.reduce(0) { $0 + $1.bytes }, "limit": KEPT_BYTES, "elements": refs.count,
+    "recordings": all.map { ["name": $0.name, "bytes": $0.bytes, "at": Int($0.at.timeIntervalSince1970)] as [String: Any] },
+  ] as [String: Any]
+}
+
+func connected() -> Any {
+  sessions.values.sorted { $0.since < $1.since }.map { ["since": Int($0.since.timeIntervalSince1970), "app": $0.app, "last": Int($0.last.timeIntervalSince1970)] as [String: Any] }
+}
+
+/// Remove what is kept. A recording that is still running is left alone.
+func clear(_ params: [String: Any]) throws -> Any {
+  switch params["what"] as? String {
+  case "recordings":
+    let busy = Set(recording.values.map { $0.url.lastPathComponent })
+    var removed = 0
+    for each in kept() where !busy.contains(each.name) {
+      if (try? FileManager.default.removeItem(at: RECORDINGS.appendingPathComponent(each.name))) != nil { removed += 1 }
+    }
+    return ["removed": removed]
+  case "cache":
+    let removed = refs.count
+    refs.removeAll()
+    named.removeAll()
+    pointer.removeAll()
+    return ["removed": removed]
+  default:
+    return try fail("`what` is recordings or cache")
+  }
+}
+
 // MARK: Pointer and keys, posted to the app's process only
 
 nonisolated(unsafe) var pointer: [String: CGPoint] = [:]
@@ -755,6 +804,9 @@ func answer(_ method: String, _ params: [String: Any]) throws -> Any {
   case "record_start": return try recordStart(params)
   case "record_stop": return try recordStop(params)
   case "frames": return try frames(params)
+  case "storage": return storage()
+  case "sessions": return connected()
+  case "clear": return try clear(params)
   default: return try fail("this helper cannot \(method)")
   }
 }
@@ -778,6 +830,10 @@ func handle(_ line: String) -> String? {
     if let app = params["app"] as? String, !app.isEmpty {
       lastApp = running(app)?.localizedName ?? app
       lastAsked = Date()
+      if sessions[asking] != nil {
+        sessions[asking]!.app = lastApp
+        sessions[asking]!.last = lastAsked
+      }
     }
     answered["result"] = try answer(method, params)
   } catch let failure as Failure {
@@ -863,9 +919,16 @@ func serve() throws {
       let joined = accept(listening, nil, nil)
       if joined < 0 { continue }
       Thread.detachNewThread {
+        work.sync { sessions[joined] = Session(since: Date()) }
         lines(from: joined) { line in
-          if let answered = work.sync(execute: { handle(line) }) { send(answered, to: joined) }
+          let answered: String? = work.sync {
+            asking = joined
+            defer { asking = -1 }
+            return handle(line)
+          }
+          if let answered { send(answered, to: joined) }
         }
+        work.sync { sessions[joined] = nil }
         close(joined)
       }
     }
@@ -946,13 +1009,36 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.addItem(entry)
   }
 
+  func size(_ bytes: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
+  func ago(_ date: Date) -> String {
+    let passed = Int(Date().timeIntervalSince(date))
+    return passed < 60 ? "just now" : passed < 3600 ? "\(passed / 60) min ago" : "\(passed / 3600) h ago"
+  }
+
   /// Built as it is opened, so it says what is true now.
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
-    let recent = Date().timeIntervalSince(lastAsked) < 60
-    add(paused ? "Paused: agents are refused" : recent ? "An agent is using \(lastApp)" : "No agent is using this Mac", nil, to: menu)
+    let (joined, all, read): ([Session], [(name: String, bytes: Int, at: Date)], Int) = work.sync { (sessions.values.sorted { $0.since < $1.since }, kept(), refs.count) }
+
+    // Who is connected.
+    add(paused ? "Paused: agents are refused" : joined.isEmpty ? "No agent is connected" : joined.count == 1 ? "1 agent is connected" : "\(joined.count) agents are connected", nil, to: menu)
+    for each in joined {
+      add("    \(each.app.isEmpty ? "has not used an app yet" : "using \(each.app), \(ago(each.last))"), connected \(ago(each.since))", nil, to: menu)
+    }
     add(paused ? "Resume" : "Pause", #selector(pause), to: menu)
+    if !joined.isEmpty { add("Disconnect All", #selector(disconnect), to: menu) }
     menu.addItem(.separator())
+
+    // What is kept.
+    add(all.isEmpty ? "No recordings are kept" : "\(all.count) recording\(all.count == 1 ? "" : "s") kept, \(size(all.reduce(0) { $0 + $1.bytes })) of \(size(KEPT_BYTES)) allowed", nil, to: menu)
+    if !all.isEmpty {
+      add("Show Recordings in Finder", #selector(reveal), to: menu)
+      add("Delete All Recordings…", #selector(deleteRecordings), to: menu)
+    }
+    add(read == 0 ? "Nothing is remembered of any window" : "\(read) thing\(read == 1 ? "" : "s") remembered from windows", nil, to: menu)
+    if read > 0 { add("Clear Cache", #selector(forget), to: menu) }
+    menu.addItem(.separator())
+
     add(AXIsProcessTrusted() ? "Accessibility: allowed" : "Allow Accessibility…", AXIsProcessTrusted() ? nil : #selector(accessibility), to: menu)
     add(CGPreflightScreenCaptureAccess() ? "Screen Recording: allowed" : "Allow Screen Recording…", CGPreflightScreenCaptureAccess() ? nil : #selector(recording), to: menu)
     menu.addItem(.separator())
@@ -962,6 +1048,27 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc func pause() {
     work.sync { paused.toggle() }
     picture()
+  }
+  /// Closed from this end. A harness that is still wanted connects again by itself.
+  @objc func disconnect() {
+    work.sync { for joined in sessions.keys { shutdown(joined, SHUT_RDWR) } }
+  }
+  @objc func reveal() {
+    try? FileManager.default.createDirectory(at: RECORDINGS, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    NSWorkspace.shared.open(RECORDINGS)
+  }
+  @objc func deleteRecordings() {
+    let alert = NSAlert()
+    alert.messageText = "Delete all recordings?"
+    alert.informativeText = "They are removed from this Mac and cannot be brought back. A recording that is still running is kept."
+    alert.addButton(withTitle: "Delete")
+    alert.addButton(withTitle: "Cancel")
+    alert.buttons.first?.hasDestructiveAction = true
+    NSApp.activate(ignoringOtherApps: true)
+    if alert.runModal() == .alertFirstButtonReturn { work.sync { _ = try? clear(["what": "recordings"]) } }
+  }
+  @objc func forget() {
+    work.sync { _ = try? clear(["what": "cache"]) }
   }
   @objc func accessibility() {
     // The system's own question, which takes the person to the setting.
