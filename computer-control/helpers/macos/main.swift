@@ -15,6 +15,7 @@
 // With `--stdio`, or built as a plain program: it answers on its own input and output,
 // with the permissions of whatever started it.
 
+import AVFoundation
 import AppKit
 import ApplicationServices
 import Foundation
@@ -348,6 +349,191 @@ func screenshot(_ params: [String: Any]) throws -> Any {
   return ["mime": "image/png", "data": png.base64EncodedString(), "name": params["region"] == nil ? "screenshot.png" : "zoom.png"]
 }
 
+// MARK: Recording
+
+let RECORDINGS = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Praecise Control/recordings")
+/// What recordings may take up together, and how long one is kept. Older ones go first.
+let KEPT_BYTES = Int(ProcessInfo.processInfo.environment["PRAECISE_CONTROL_RECORDINGS_BYTES"] ?? "") ?? 2 * 1024 * 1024 * 1024
+let KEPT_SECONDS: TimeInterval = 24 * 3600
+let LONGEST = 600
+
+/// One recording: what the window shows, written as it arrives. Its frames come on a queue of its own.
+final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
+  let app: String
+  let url: URL
+  let started = Date()
+  let limit: Int
+  private let stream: SCStream
+  private let writer: AVAssetWriter
+  private let video: AVAssetWriterInput
+  private let sound: AVAssetWriterInput?
+  private let queue = DispatchQueue(label: "com.praecise.control.recording")
+  private var begun = false
+  private var ended = false
+
+  init(app: String, url: URL, window: SCWindow, width: Int, height: Int, rate: Int, audio: Bool, limit: Int) throws {
+    self.app = app
+    self.url = url
+    self.limit = limit
+    let setup = SCStreamConfiguration()
+    setup.width = width
+    setup.height = height
+    setup.showsCursor = false
+    setup.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(rate))
+    setup.capturesAudio = audio
+    stream = SCStream(filter: SCContentFilter(desktopIndependentWindow: window), configuration: setup, delegate: nil)
+    writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+    video = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height])
+    video.expectsMediaDataInRealTime = true
+    writer.add(video)
+    if audio {
+      let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 128_000])
+      input.expectsMediaDataInRealTime = true
+      writer.add(input)
+      sound = input
+    } else {
+      sound = nil
+    }
+    super.init()
+    try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+    if audio { try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue) }
+    guard writer.startWriting() else { throw Failure(message: "the recording could not be started: \(writer.error?.localizedDescription ?? "the file could not be written")") }
+  }
+
+  func start() throws {
+    try wait { try await self.stream.startCapture() }
+  }
+
+  func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    guard !ended, buffer.isValid else { return }
+    if type == .screen {
+      // Only a frame that is a whole new picture. The others say nothing changed.
+      guard let notes = CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+        let state = notes.first?[.status] as? Int, state == SCFrameStatus.complete.rawValue
+      else { return }
+      if !begun {
+        writer.startSession(atSourceTime: buffer.presentationTimeStamp)
+        begun = true
+      }
+      if video.isReadyForMoreMediaData { video.append(buffer) }
+    } else if type == .audio, begun, let sound, sound.isReadyForMoreMediaData {
+      sound.append(buffer)
+    }
+  }
+
+  /// End it and say how long it ran. What was written can then be played.
+  func stop() throws -> Double {
+    try? wait { try await self.stream.stopCapture() }
+    let done = DispatchSemaphore(value: 0)
+    queue.sync { ended = true }
+    guard begun else {
+      writer.cancelWriting()
+      throw Failure(message: "nothing was recorded: the window showed no picture while it ran")
+    }
+    video.markAsFinished()
+    sound?.markAsFinished()
+    writer.finishWriting { done.signal() }
+    done.wait()
+    if writer.status != .completed { throw Failure(message: "the recording could not be finished: \(writer.error?.localizedDescription ?? "unknown")") }
+    return min(Date().timeIntervalSince(started), Double(limit))
+  }
+}
+
+nonisolated(unsafe) var recording: [String: Recorder] = [:]
+
+/// Keep what is recorded within its bounds: nothing older than a day, and no more than the limit in all.
+func prune() -> Int {
+  let manager = FileManager.default
+  let busy = Set(recording.values.map { $0.url.path })
+  var kept: [(path: String, size: Int, at: Date)] = []
+  for name in (try? manager.contentsOfDirectory(atPath: RECORDINGS.path)) ?? [] {
+    let path = RECORDINGS.appendingPathComponent(name).path
+    guard let known = try? manager.attributesOfItem(atPath: path), let at = known[.modificationDate] as? Date, let size = (known[.size] as? NSNumber)?.intValue else { continue }
+    if !busy.contains(path), Date().timeIntervalSince(at) > KEPT_SECONDS { try? manager.removeItem(atPath: path) } else { kept.append((path, size, at)) }
+  }
+  var total = kept.reduce(0) { $0 + $1.size }
+  for each in kept.sorted(by: { $0.at < $1.at }) where total > KEPT_BYTES && !busy.contains(each.path) {
+    try? manager.removeItem(atPath: each.path)
+    total -= each.size
+  }
+  return total
+}
+
+func recordStart(_ params: [String: Any]) throws -> Any {
+  let target = try target(params)
+  guard CGPreflightScreenCaptureAccess() else { return try fail("Screen Recording is not allowed for this program; allow it in System Settings, Privacy & Security, Screen & System Audio Recording") }
+  if recording.values.contains(where: { $0.app == target.id }) { return try fail("\(target.id) is already being recorded; stop that first") }
+  try FileManager.default.createDirectory(at: RECORDINGS, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+  if prune() >= KEPT_BYTES { return try fail("the recordings kept here have reached their limit and none can be removed; stop one that is running") }
+  let limit = max(1, min(LONGEST, (params["seconds"] as? NSNumber)?.intValue ?? 60))
+  let rate = max(1, min(30, (params["fps"] as? NSNumber)?.intValue ?? 10))
+  // A picture's sides have to be even for the usual way of encoding one.
+  let width = Int(target.frame.width.rounded()) / 2 * 2
+  let height = Int(target.frame.height.rounded()) / 2 * 2
+  let window: SCWindow = try wait {
+    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    let mine = content.windows.filter { $0.owningApplication?.processID == target.pid && $0.windowLayer == 0 }
+    guard let near = mine.first(where: { abs($0.frame.minX - target.frame.minX) < 2 && abs($0.frame.minY - target.frame.minY) < 2 && abs($0.frame.width - target.frame.width) < 2 }) else {
+      throw Failure(message: "the window is not on the screen to be recorded; it may be minimised or on another desktop")
+    }
+    return near
+  }
+  let stamp = DateFormatter()
+  stamp.dateFormat = "yyyyMMdd-HHmmss"
+  let name = "\(stamp.string(from: Date()))-\(target.id.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." }.prefix(40))"
+  let recorder = try Recorder(app: target.id, url: RECORDINGS.appendingPathComponent(name + ".mp4"), window: window, width: width, height: height, rate: rate, audio: params["audio"] as? Bool == true, limit: limit)
+  try recorder.start()
+  recording[name] = recorder
+  // It ends by itself at the length it was started with, and what it wrote is kept.
+  work.asyncAfter(deadline: .now() + .seconds(limit)) {
+    if let still = recording[name], still === recorder {
+      recording[name] = nil
+      _ = try? still.stop()
+    }
+  }
+  return ["recording": name, "seconds": limit, "width": width, "height": height] as [String: Any]
+}
+
+func recordStop(_ params: [String: Any]) throws -> Any {
+  let name = params["recording"] as? String ?? ""
+  guard let recorder = recording.removeValue(forKey: name) else {
+    // One that ended by itself at its length is still there to be asked about.
+    let kept = RECORDINGS.appendingPathComponent(name + ".mp4")
+    if !name.isEmpty, let size = (try? FileManager.default.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber {
+      return ["recording": name, "path": kept.path, "mime": "video/mp4", "bytes": size.intValue] as [String: Any]
+    }
+    return try fail("\(name.isEmpty ? "that" : name) is not a recording that is running")
+  }
+  let seconds = try recorder.stop()
+  let size = ((try? FileManager.default.attributesOfItem(atPath: recorder.url.path))?[.size] as? NSNumber)?.intValue ?? 0
+  return ["recording": name, "path": recorder.url.path, "mime": "video/mp4", "bytes": size, "seconds": (seconds * 10).rounded() / 10] as [String: Any]
+}
+
+/// Pictures from a recording, spread evenly through it.
+func frames(_ params: [String: Any]) throws -> Any {
+  let name = ((params["recording"] as? String ?? "") as NSString).lastPathComponent.replacingOccurrences(of: ".mp4", with: "")
+  let url = RECORDINGS.appendingPathComponent(name + ".mp4")
+  guard !name.isEmpty, FileManager.default.fileExists(atPath: url.path) else { return try fail("there is no recording called \(name.isEmpty ? "that" : name) here") }
+  let count = max(1, min(12, (params["count"] as? NSNumber)?.intValue ?? 4))
+  let asset = AVURLAsset(url: url)
+  let length: Double = try wait { try await asset.load(.duration).seconds }
+  guard length > 0 else { return try fail("\(name) cannot be read as a recording") }
+  let maker = AVAssetImageGenerator(asset: asset)
+  maker.appliesPreferredTrackTransform = true
+  maker.requestedTimeToleranceBefore = .zero
+  maker.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+  var out: [[String: Any]] = []
+  for nth in 0..<count {
+    let at = length * (Double(nth) + 0.5) / Double(count)
+    guard let image = try? maker.copyCGImage(at: CMTime(seconds: at, preferredTimescale: 600), actualTime: nil),
+      let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    else { continue }
+    out.append(["mime": "image/png", "data": png.base64EncodedString(), "name": String(format: "frame-%.1fs.png", at), "at": (at * 10).rounded() / 10])
+  }
+  if out.isEmpty { return try fail("no picture could be taken from \(name)") }
+  return ["recording": name, "seconds": (length * 10).rounded() / 10, "frames": out] as [String: Any]
+}
+
 // MARK: Pointer and keys, posted to the app's process only
 
 nonisolated(unsafe) var pointer: [String: CGPoint] = [:]
@@ -500,7 +686,7 @@ func hello() -> Any {
     "system": "macos",
     "user": NSUserName(),
     "host": ProcessInfo.processInfo.hostName,
-    "can": ["activate", "fill"],
+    "can": ["activate", "fill", "record"],
     "needs": [
       ["name": "Accessibility", "ok": AXIsProcessTrusted(), "fix": "Allow this program, or the one that starts it, in System Settings, Privacy & Security, Accessibility."],
       ["name": "Screen Recording", "ok": CGPreflightScreenCaptureAccess(), "fix": "Allow this program, or the one that starts it, in System Settings, Privacy & Security, Screen & System Audio Recording."],
@@ -566,6 +752,9 @@ func answer(_ method: String, _ params: [String: Any]) throws -> Any {
   case "type": return try type(params)
   case "key": return try key(params)
   case "cursor": return try cursor(params)
+  case "record_start": return try recordStart(params)
+  case "record_stop": return try recordStop(params)
+  case "frames": return try frames(params)
   default: return try fail("this helper cannot \(method)")
   }
 }
