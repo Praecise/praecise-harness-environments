@@ -215,7 +215,7 @@ if (flag("--cloud") >= 0) {
       // The token first: signing in can take a person a while, and the line is opened once there is something to say on it.
       const mine = await token();
       socket = new WebSocket(`${address.replace(/^http/, "ws")}/host`);
-      socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "hello", token: mine, machine, name: hostname() })));
+      socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "hello", token: mine, machine, name: hostname(), system: { darwin: "macos", win32: "windows", linux: "linux" }[process.platform] ?? "unknown" })));
     } catch (err) {
       note(`could not connect: ${err.message}`);
       return setTimeout(connect, (wait = Math.min(wait * 2, 60_000)));

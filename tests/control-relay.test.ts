@@ -10,8 +10,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, sign } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -56,7 +58,9 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   };
   t.after(() => account.close());
 
-  await started(process.execPath, [RELAY], { CONTROL_ADDRESS: address, CONTROL_ISSUER: issuer, CONTROL_CLAIMS_HOOK_SECRET: SECRET, PORT: String(port) }, "praecise-control-relay");
+  const data = mkdtempSync(join(tmpdir(), "control-relay-test-"));
+  t.after(() => rmSync(data, { recursive: true, force: true }));
+  await started(process.execPath, [RELAY], { CONTROL_ADDRESS: address, CONTROL_ISSUER: issuer, CONTROL_CLAIMS_HOOK_SECRET: SECRET, CONTROL_DATA: data, PORT: String(port) }, "praecise-control-relay");
 
   /** An answer whose body is read once, and which says what was asked when there is nothing in it. */
   const answered = async (response: Response, asked: unknown) => {
@@ -70,8 +74,8 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
       },
     };
   };
-  const mcp = async (bearer: string | undefined, body: unknown, more: Record<string, string> = {}) =>
-    answered(await fetch(`${address}/mcp`, { method: "POST", headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...more }, body: JSON.stringify(body) }), body);
+  const mcp = async (bearer: string | undefined, body: unknown, more: Record<string, string> = {}, at = "/mcp") =>
+    answered(await fetch(`${address}${at}`, { method: "POST", headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...more }, body: JSON.stringify(body) }), body);
   const hook = async (body: Record<string, unknown>, secret = SECRET) => {
     const raw = JSON.stringify(body);
     const at = Date.now();
@@ -82,7 +86,7 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
 
   // What it says of itself.
   const about = (await (await fetch(`${address}/.well-known/oauth-protected-resource`)).json()) as Record<string, unknown>;
-  assert.deepEqual([about.resource, about.authorization_servers, about.scopes_supported], [address, [issuer], ["control:use"]]);
+  assert.deepEqual([about.resource, about.authorization_servers, about.scopes_supported], [address, [issuer], ["control:use", "control:screen", "control:act", "control:record", "control:devices", "control:manage"]]);
   assert.equal(((await (await fetch(`${address}/oauth/client.json`)).json()) as { client_id: string }).client_id, `${address}/oauth/client.json`);
 
   // Nobody gets in without a token of the account service's, for this relay, that allows it.
@@ -112,7 +116,7 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   assert.equal(choices[0]!.requested.control_machine, machine);
   assert.deepEqual((await hook({ account: alice, scopes: ["control:use", "control:host"], resource: address, requested: choices[0]!.requested })).said.error, "access_denied");
   const granted = (await hook({ account: alice, scopes: ["control:use"], resource: address, requested: choices[0]!.requested })).said;
-  assert.deepEqual([granted.claims, granted.scopes], [{ control_machine: machine }, ["control:use"]]);
+  assert.deepEqual([granted.claims, granted.scopes], [{ control_devices: machine, control_machine: machine }, ["control:use"]]);
   assert.match((await hook({ account: { ...alice, id: "bob" }, scopes: ["control:use"], resource: address, requested: {} })).said.error_description, /No computer of yours/);
 
   // The assistant, from outside, with the token Alice gave it.
@@ -149,11 +153,66 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   const his = (await (await mcp(token({ sub: "bob", scope: "control:use", control_machine: machine }), { jsonrpc: "2.0", id: 7, method: "tools/list" })).json()) as { error: { message: string } };
   assert.match(his.error.message, /not connected/);
 
+  // An app she allowed to see only: it reads, and is refused a press before anything reaches the computer.
+  const app = "https://app.example/client.json";
+  const call = (id: number, name: string, args: Record<string, unknown>) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const sees = token({ sub: "alice", scope: "control:screen control:devices", control_devices: machine, client_id: app });
+  const read = (await (await mcp(sees, call(20, "computer_control_elements", { app: "mail", action: "find", query: "send" }))).json()) as { result: { content: { text: string }[] } };
+  assert.equal(read.result.content[0]!.text, 'button "Send" [e3]');
+  const pressed = (await (await mcp(sees, call(21, "computer_control_elements", { app: "mail", action: "click", ref: "e3" }))).json()) as { error: { code: number; data: { needs: string[] } } };
+  assert.deepEqual([pressed.error.code, pressed.error.data.needs], [-32002, ["act"]]);
+  const taped = (await (await mcp(sees, call(22, "computer_control_record", { app: "mail", action: "start" }))).json()) as { error: { data: { needs: string[] } } };
+  assert.deepEqual(taped.error.data.needs, ["record"]);
+  // The app may hold a helper of its own to less, name it, and say which computer in the address.
+  const narrowed = (await (await mcp(hers, call(23, "computer_control_elements", { app: "mail", action: "click", ref: "e3" }), { "praecise-control-only": "screen", "praecise-control-actor": "helper-one" }, `/mcp/${machine}`)).json()) as { error: { data: { needs: string[] } } };
+  assert.deepEqual(narrowed.error.data.needs, ["act"]);
+  assert.equal((await mcp(hers, { jsonrpc: "2.0", id: 24, method: "ping" }, {}, `/mcp/${"z".repeat(12)}`)).status, 403);
+  // A time that has passed ends it.
+  assert.equal((await mcp(token({ sub: "alice", scope: "control:use", control_devices: machine, control_until: String(Math.floor(Date.now() / 1000) - 5) }), { jsonrpc: "2.0", id: 25, method: "ping" })).status, 403);
+  assert.equal((await hook({ account: alice, client_id: app, scopes: ["control:screen"], resource: address, requested: { control_devices: machine, control_until: "1000000000" } })).said.error, "access_denied");
+  const timed = (await hook({ account: alice, client_id: app, scopes: ["control:screen", "control:act"], resource: address, requested: { control_devices: `${machine} ${"q".repeat(12)}`, control_until: String(Math.floor(Date.now() / 1000) + 3600) } })).said;
+  assert.deepEqual([timed.claims.control_devices, timed.scopes, typeof timed.claims.control_until], [machine, ["control:screen", "control:act"], "string"]);
+  assert.deepEqual((await hook({ account: alice, client_id: app, scopes: ["control:devices"], resource: address, requested: {} })).said.scopes, ["control:devices"]);
+
+  // The list: an app sees her computers and what it may do on each; she sees which apps, and what was done.
+  const get = async (bearer: string, at: string, method = "GET", body?: unknown) => {
+    const response = await fetch(`${address}${at}`, { method, headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, said: (await response.json()) as Record<string, any> };
+  };
+  const seen = (await get(sees, "/devices")).said.devices as Record<string, any>[];
+  assert.deepEqual([seen.length, seen[0]!.id, seen[0]!.connected, seen[0]!.allowed, seen[0]!.in_use], [1, machine, true, ["screen"], true]);
+  assert.equal((await get(sees, `/devices/${machine}`, "PATCH", { name: "Not hers to name" })).status, 403);
+  assert.equal((await get(token({ sub: "bob", scope: "control:devices" }), "/devices")).said.devices.length, 0);
+  const manages = token({ sub: "alice", scope: "control:manage" });
+  assert.equal((await get(manages, `/devices/${machine}`, "PATCH", { name: "The desk Mac" })).said.devices[0].name, "The desk Mac");
+  const done = (await get(manages, `/devices/${machine}/activity`)).said.activity as { app: string; by: string | null; did: string; on: string }[];
+  assert.ok(done.some((each) => each.app === app && each.did === "elements:find" && each.on === "mail"));
+  assert.ok(!done.some((each) => each.app === app && each.did === "elements:click"), "what was refused here never reached the computer and is not written as done");
+  // She narrows the app on that computer, then withdraws it; both hold at once, and at the next renewal.
+  const at = `/devices/${machine}/apps/${encodeURIComponent(app)}`;
+  const acts = token({ sub: "alice", scope: "control:screen control:act", control_devices: machine, client_id: app });
+  assert.deepEqual((await get(manages, at, "PUT", { only: ["screen"] })).said.devices[0].apps, [{ app, withdrawn: false, only: ["screen"], until: null }]);
+  assert.deepEqual(((await (await mcp(acts, call(26, "computer_control_open", { app: "mail" }))).json()) as { error: { data: { needs: string[] } } }).error.data.needs, ["act"]);
+  assert.equal((await get(manages, at, "DELETE")).status, 200);
+  assert.equal((await mcp(acts, { jsonrpc: "2.0", id: 27, method: "ping" })).status, 403);
+  assert.equal((await hook({ account: alice, client_id: app, scopes: ["control:screen"], resource: address, requested: { control_devices: machine } })).said.error, "access_denied");
+  assert.equal((await mcp(hers, { jsonrpc: "2.0", id: 28, method: "ping" })).status, 200, "another app she allowed is not touched by it");
+
   // When her computer stops, there is nothing left to reach.
   computer.kill();
   await new Promise((resolve) => computer.on("exit", resolve));
   await new Promise((resolve) => setTimeout(resolve, 500));
   const gone = (await (await mcp(hers, { jsonrpc: "2.0", id: 8, method: "tools/list" })).json()) as { error: { message: string } };
   assert.match(gone.error.message, /not connected/);
+  // It is still hers, and still listed: she may allow an app on it before it is back.
+  const later = (await hook({ account: alice, scopes: ["control:use"], resource: address, requested: {} })).said.choices as { label: string; detail: string }[];
+  assert.deepEqual([later[0]!.label, later[0]!.detail], ["The desk Mac", "Not connected just now"]);
+  assert.equal((await get(manages, "/devices")).said.devices[0].connected, false);
+  // Removed, it is refused to every app and not offered again until she restores it.
+  assert.equal((await get(manages, `/devices/${machine}`, "DELETE")).said.devices[0].removed, true);
+  assert.equal((await mcp(hers, { jsonrpc: "2.0", id: 29, method: "ping" })).status, 403);
   assert.match((await hook({ account: alice, scopes: ["control:use"], resource: address, requested: {} })).said.error_description, /No computer of yours/);
+  // And it is written down, a moment after, so that a new start of the relay does not forget it.
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  assert.equal(JSON.parse(readFileSync(join(data, "computers.json"), "utf8")).alice.devices[machine].removed, true);
 });
