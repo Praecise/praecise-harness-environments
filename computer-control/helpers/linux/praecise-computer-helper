@@ -683,6 +683,10 @@ def record_stop(params):
     name = str(params.get("recording") or "")
     held = recording.pop(name, None)
     if held is None:
+        # One that has ended, by itself at its length or by being stopped, is still there to be asked about.
+        kept_at = os.path.join(RECORDINGS, os.path.basename(name) + ".mp4")
+        if name and os.path.exists(kept_at):
+            return {"recording": name, "path": kept_at, "mime": "video/mp4", "bytes": os.path.getsize(kept_at)}
         raise Failure("%s is not a recording that is running" % (name or "that"))
     process = held["process"]
     if process.poll() is None:

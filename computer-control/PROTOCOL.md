@@ -63,7 +63,7 @@ A helper that lists `record` in `can` also answers:
 | Method | Params | Result |
 |---|---|---|
 | `record_start` | `app`, `seconds?` (the longest it may run), `audio?`, `fps?` | `{ recording, seconds, width, height }`. One recording per app at a time. |
-| `record_stop` | `recording` | `{ recording, path, mime, bytes, seconds }`. The file stays on the machine. |
+| `record_stop` | `recording` | `{ recording, path, mime, bytes, seconds }`. The file stays on the machine. Asked again of one that has ended, it says where the file is. |
 | `frames` | `recording`, `count?` | `{ recording, seconds, frames: [{ mime, data, name, at }] }`: pictures spread evenly through it. |
 
 Recordings are kept in one folder of the helper's own, for a day and within a size

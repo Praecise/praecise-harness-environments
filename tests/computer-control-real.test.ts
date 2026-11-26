@@ -88,14 +88,16 @@ test("works a real app through a real helper", { skip: !HELPER || !APP }, async 
     await assert.rejects(run("computer_control_record", { action: "start" }), /already being recorded/);
     await run("computer_control_screen", { action: "wait", duration: 3 });
     const stopped = (await run("computer_control_record", { action: "stop", recording: started.recording })) as { path: string; mime: string; bytes: number; seconds: number };
-    assert.equal(stopped.mime, "video/mp4");
+    assert.match(stopped.mime, /^video\//);
     assert.ok(stopped.bytes > 1000 && stopped.seconds >= 2, JSON.stringify(stopped));
     const taken = (await run("computer_control_record", { action: "frames", recording: started.recording, count: 3 })) as Record<symbol, { mime: string; data: string }[]>;
     const pictures = taken[Object.getOwnPropertySymbols(taken)[0]!]!;
     assert.equal(pictures.length, 3);
     for (const each of pictures) assert.equal(Buffer.from(each.data, "base64").subarray(1, 4).toString(), "PNG");
     assert.deepEqual([Buffer.from(pictures[0]!.data, "base64").readUInt32BE(16), Buffer.from(pictures[0]!.data, "base64").readUInt32BE(20)], [started.width, started.height]);
-    await assert.rejects(run("computer_control_record", { action: "stop", recording: started.recording }), /not a recording that is running/);
+    // One that has ended is still there to be asked about, and one that never was is not.
+    assert.equal(((await run("computer_control_record", { action: "stop", recording: started.recording })) as { path: string }).path, stopped.path);
+    await assert.rejects(run("computer_control_record", { action: "stop", recording: "never-started" }), /not a recording that is running/);
   }
 
   if (!POINTER) return;

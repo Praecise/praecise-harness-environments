@@ -250,7 +250,7 @@ sealed class Recorder {
       if (file.Length < 240 || new string(reader.ReadChars(4)) != "RIFF") return found;
       file.Position = 132;
       rate = Math.Max(1, reader.ReadInt32());
-      file.Position = 212;
+      file.Position = 216;
       var size = reader.ReadInt32();
       var movi = file.Position;
       if (new string(reader.ReadChars(4)) != "movi") return found;
