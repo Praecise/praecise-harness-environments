@@ -125,6 +125,9 @@ function proof(request, token, thumbprint) {
 
 // The computers connected now, by the person each belongs to.
 
+/** What a request is answered with when the computer it was sent to goes away before answering. */
+const GONE = Symbol("gone");
+
 /** @type {Map<string, Map<string, {name: string, say(text: string): void, end(): void, waiting: Map<number, (reply: unknown) => void>, since: number}>>} */
 const people = new Map();
 let asked = 0;
@@ -178,6 +181,8 @@ function frames(socket, heard, closed) {
   });
   socket.on("close", closed);
   socket.on("error", closed);
+  // The other end has finished. This end finishes too, at once, and does not wait to find out by writing.
+  socket.on("end", () => socket.end());
   // Said now and then, so that nothing between here and the computer takes a quiet line for a dead one.
   const alive = setInterval(() => write(9, Buffer.alloc(0)), 25_000);
   socket.on("close", () => clearInterval(alive));
@@ -234,7 +239,8 @@ function host(request, socket) {
       const computers = people.get(person);
       if (computers?.get(machine) === mine) computers.delete(machine);
       if (computers && !computers.size) people.delete(person);
-      for (const answer of mine.waiting.values()) answer(undefined);
+      // Whoever was waiting on it is told it has gone, not left to think nothing was asked.
+      for (const answer of mine.waiting.values()) answer(GONE);
     },
   );
 }
@@ -245,16 +251,16 @@ function hook(body, signature) {
   const [, v1] = /(?:^|,)v1=([0-9a-f]+)/.exec(signature ?? "") ?? [];
   const expected = createHmac("sha256", SECRET).update(`${t}.${body}`).digest();
   if (!SECRET || !t || !v1 || Math.abs(Date.now() - Number(t)) > 300_000 || v1.length !== 64 || !timingSafeEqual(expected, Buffer.from(v1, "hex"))) throw new Refused(401, "that did not come from the account service");
-  const asked = JSON.parse(body);
-  const person = asked.account?.id;
+  const put = JSON.parse(body);
+  const person = put.account?.id;
   if (!person) return { error: "access_denied", error_description: "Praecise Control is used by a person, for their own computers." };
   // A computer of the person's own, connecting itself.
-  if (asked.scopes?.includes("control:host")) {
-    if (asked.scopes.includes("control:use")) return { error: "access_denied", error_description: "A computer connects itself, or an assistant uses one. Not both with one permission." };
+  if (put.scopes?.includes("control:host")) {
+    if (put.scopes.includes("control:use")) return { error: "access_denied", error_description: "A computer connects itself, or an assistant uses one. Not both with one permission." };
     return { claims: {}, scopes: ["control:host"], label: "This computer" };
   }
   const computers = people.get(person) ?? new Map();
-  const chosen = asked.requested?.control_machine;
+  const chosen = put.requested?.control_machine;
   // One that was chosen before stays chosen, connected just now or not: a renewal is not the time to forget it.
   if (typeof chosen === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(chosen)) {
     return { claims: { control_machine: chosen }, scopes: ["control:use"], label: computers.get(chosen)?.name ?? "Your computer", requested: { control_machine: chosen } };
@@ -299,11 +305,10 @@ const server = createServer((request, response) => {
       } catch {
         return say(400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "that is not JSON" } });
       }
-      if (!computer) {
-        // Said as the protocol says a failure, so that the assistant can tell its person why.
-        const failed = (each) => ({ jsonrpc: "2.0", id: each?.id ?? null, error: { code: -32001, message: "The computer is not connected to Praecise Control just now. Its person starts the public route on it." } });
-        return say(200, Array.isArray(message) ? message.filter((each) => each?.id !== undefined).map(failed) : failed(message));
-      }
+      // Said as the protocol says a failure, so that the assistant can tell its person why.
+      const failed = (each) => ({ jsonrpc: "2.0", id: each?.id ?? null, error: { code: -32001, message: "The computer is not connected to Praecise Control just now. Its person starts the public route on it." } });
+      const absent = () => say(200, Array.isArray(message) ? message.filter((each) => each?.id !== undefined).map(failed) : failed(message));
+      if (!computer) return absent();
       const id = ++asked;
       const reply = await new Promise((resolve) => {
         const timer = setTimeout(() => {
@@ -316,6 +321,7 @@ const server = createServer((request, response) => {
         });
         computer.say(JSON.stringify({ id, message, client: said.client_id }));
       });
+      if (reply === GONE) return absent();
       if (reply === null) return say(504, { error: "the computer did not answer in time" });
       if (reply === undefined) return say(202);
       return say(200, reply);

@@ -58,8 +58,20 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
 
   await started(process.execPath, [RELAY], { CONTROL_ADDRESS: address, CONTROL_ISSUER: issuer, CONTROL_CLAIMS_HOOK_SECRET: SECRET, PORT: String(port) }, "praecise-control-relay");
 
-  const mcp = (bearer: string | undefined, body: unknown, more: Record<string, string> = {}) =>
-    fetch(`${address}/mcp`, { method: "POST", headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...more }, body: JSON.stringify(body) });
+  /** An answer whose body is read once, and which says what was asked when there is nothing in it. */
+  const answered = async (response: Response, asked: unknown) => {
+    const text = await response.text();
+    return {
+      status: response.status,
+      headers: response.headers,
+      json: async (): Promise<unknown> => {
+        assert.ok(text, `an empty answer, status ${response.status}, to ${JSON.stringify(asked).slice(0, 160)}`);
+        return JSON.parse(text);
+      },
+    };
+  };
+  const mcp = async (bearer: string | undefined, body: unknown, more: Record<string, string> = {}) =>
+    answered(await fetch(`${address}/mcp`, { method: "POST", headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...more }, body: JSON.stringify(body) }), body);
   const hook = async (body: Record<string, unknown>, secret = SECRET) => {
     const raw = JSON.stringify(body);
     const at = Date.now();
@@ -127,7 +139,8 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
     const body = b64({ htm: "POST", htu, iat: Math.floor(Date.now() / 1000), jti: String(Math.random()), ath: createHash("sha256").update(tied).digest("base64url") });
     return `${head}.${body}.${sign("sha256", Buffer.from(`${head}.${body}`), { key: bound.privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url")}`;
   };
-  const asDpop = (headers: Record<string, string>) => fetch(`${address}/mcp`, { method: "POST", headers: { "content-type": "application/json", authorization: `DPoP ${tied}`, ...headers }, body: JSON.stringify({ jsonrpc: "2.0", id: 6, method: "ping" }) });
+  const asDpop = async (headers: Record<string, string>) =>
+    answered(await fetch(`${address}/mcp`, { method: "POST", headers: { "content-type": "application/json", authorization: `DPoP ${tied}`, ...headers }, body: JSON.stringify({ jsonrpc: "2.0", id: 6, method: "ping" }) }), "ping with a proof");
   assert.equal((await asDpop({})).status, 401);
   assert.equal((await asDpop({ dpop: proof(`${address}/elsewhere`) })).status, 401);
   assert.deepEqual(((await (await asDpop({ dpop: proof(`${address}/mcp`) })).json()) as { result: unknown }).result, {});
