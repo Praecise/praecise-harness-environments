@@ -266,12 +266,12 @@ What differs from Chrome:
 Tried in a real Firefox 158 through geckodriver (`tests/firefox-real.test.ts`) and in a
 real Chromium (`tests/browser-page-real.test.ts`).
 
-## From Claude Code, Codex and other clients
+## From any agent
 
-`mcp.mjs` serves Praecise Control to a client that speaks MCP. The client is given the
+`mcp.mjs` serves Praecise Control to whatever agent is asking. The agent is given the
 apps as tools: `computer_control_accounts`, `computer_control_elements`,
-`computer_control_screen` and `computer_control_open`. A screenshot arrives as an image.
-Everything is still held to each app's mode.
+`computer_control_screen`, `computer_control_record` and `computer_control_open`. A
+screenshot arrives as an image. Everything is still held to each app's mode.
 
 Set it up once, in a folder of its own:
 
@@ -284,23 +284,44 @@ npx praecise computer-control connect && npx praecise computer-control sync
 npx praecise computer-control mode textedit draft
 ```
 
-Then tell the client to start `node <folder>/node_modules/@praecise/harness-environments/computer-control/mcp.mjs <folder>`,
-with `PRAECISE_CONTROL_APPS` in its environment. Each client's own way of saying that,
-from its documentation as read on 26 Nov 2026:
+`<front>` below is `node <folder>/node_modules/@praecise/harness-environments/computer-control/mcp.mjs <folder>`.
+
+Three kinds of agent are served from the one app, and none of them is told apart by
+name: each is answered by how it asks.
+
+| The agent | How it asks | What it is given |
+|---|---|---|
+| Speaks the current revision of MCP (2026-07-28): praecise-harness, a Tenzro node, which say so with every request and open with `server/discover` | `<front>`, or `<front> --http` | Each request handed to the app exactly as it came |
+| Opens with the earlier handshake: Claude Code, Claude Desktop, Codex, Cursor, VS Code, Gemini CLI | `<front>`, or `<front> --http` | The handshake answered, and each request put to the app in the app's revision |
+| Calls functions the OpenAI way and is no MCP client: a loop over Chat Completions or Responses, a Tenzro node's `/v1/chat/completions` among them | `<front> --tools openai` for the definitions, `<front> --call <tool> '<arguments>'` for each call its model makes | The tools as function definitions, and each result as text and pictures |
+
+Over HTTP it listens on this machine only, at `http://127.0.0.1:17346/mcp`. It refuses a
+request from a web page, and wants the token it keeps in
+`<folder>/.praecise/control-http.token` as a bearer. Nothing is pushed: a request is
+POSTed and answered.
+
+Each client's own way of being told, from its documentation as read on 26 Nov 2026:
 
 | Client | How |
 |---|---|
-| Claude Code | `claude mcp add --env PRAECISE_CONTROL_APPS=TextEdit,Numbers praecise-control -- node <path>/mcp.mjs <folder>`. Tried with 2.1.323 and 2.1.332: connected |
-| Codex | `codex mcp add praecise-control --env PRAECISE_CONTROL_APPS=TextEdit,Numbers -- node <path>/mcp.mjs <folder>`, or `[mcp_servers.praecise-control]` with `command`, `args` and an `env` table in `~/.codex/config.toml`. Not tried |
+| Claude Code | `claude mcp add --env PRAECISE_CONTROL_APPS=TextEdit,Numbers praecise-control -- <front>`, or over HTTP: `claude mcp add --transport http praecise-control http://127.0.0.1:17346/mcp --header "Authorization: Bearer <token>"`. Both tried with 2.1.323; the first with 2.1.332 as well: connected |
+| Codex | `codex mcp add praecise-control --env PRAECISE_CONTROL_APPS=TextEdit,Numbers -- <front>`, or `[mcp_servers.praecise-control]` with `command`, `args` and an `env` table in `~/.codex/config.toml`. Not tried |
 | Cursor | `.cursor/mcp.json` or `~/.cursor/mcp.json`: `{"mcpServers":{"praecise-control":{"command":"node","args":["<path>/mcp.mjs","<folder>"],"env":{"PRAECISE_CONTROL_APPS":"TextEdit,Numbers"}}}}`. Not tried |
 | VS Code | "MCP: Add Server" in the Command Palette, then "Command (stdio)". Not tried |
 | Gemini CLI | `gemini mcp add -e PRAECISE_CONTROL_APPS=TextEdit,Numbers praecise-control node <path>/mcp.mjs <folder>`, or the same `mcpServers` shape in `~/.gemini/settings.json`. Not tried |
+| A Tenzro node, or anything else on the current revision | `<front>` or `<front> --http`. Tried with requests made the way that revision makes them, not with a Tenzro node |
+| ChatGPT | Not reachable as this stands. ChatGPT calls from OpenAI's side, so it needs an address on the public internet over HTTPS, with OAuth or nothing in front of it. This listens on this machine only, on purpose. See below |
 
 Why there is a file for this at all: praecise-harness speaks the current revision of
-MCP (2026-07-28) and no earlier one, and these clients still open with the earlier
-handshake. Claude Code 2.1.332, the latest on the day, was refused by `praecise mcp`
-and connected through `mcp.mjs`. `mcp.mjs` answers the handshake and passes each
-request to the app unchanged; the harness is as it was.
+MCP and no earlier one, and most clients still open with the earlier handshake. Claude
+Code 2.1.332, the latest on the day, was refused by `praecise mcp` and connected through
+`mcp.mjs`. `mcp.mjs` answers the handshake and passes each request to the app
+unchanged; the harness is as it was.
+
+**ChatGPT, and anything else that calls from somewhere else.** Putting the control of a
+person's computer at a public address is a decision, not a setting. It wants a sign-in
+of the person's own in front of it, and a way to that machine that the person opened.
+Neither is built here.
 
 A press that needs a person is refused over MCP with a line saying so. The harness does
 not take an approval over MCP, on purpose: a message from a client must not be what
