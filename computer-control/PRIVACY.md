@@ -32,6 +32,13 @@ you connected read and work that one tab, on that tab's site, until you stop it,
 tab closes or it leaves the site. It does not read your other tabs or your history,
 and it does not collect or send anything to Praecise.
 
+The extension's use of information received from the browser adheres to the
+[Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq),
+including the Limited Use requirements: what it reads of the tab you offered is used
+only to let the agent you connected work that tab, is passed only to the Praecise
+Control program on your own computer, and is not sold, not used for advertising, and
+not read by any person at Praecise.
+
 ## The public route
 
 The public route is off until you start it. It lets an assistant or an app you allow

@@ -24,8 +24,10 @@ import { browserScreen, type Screen } from "@praecise/harness";
 
 import { appScreen, type Helper } from "./index.ts";
 
-/** The extension's id, which follows from the key in its manifest. */
+/** The extension's id as it is built from this repository, which follows from the key in its manifest. */
 export const EXTENSION = "aadpnkpndmkmccflljbpklaiehkhjekb";
+/** Every id the extension is known by: the one above, and the one each store gave it when it was published there. */
+export const EXTENSIONS: readonly string[] = [EXTENSION];
 /** The port the extension looks for an agent on. */
 export const PORT = 17345;
 
@@ -37,7 +39,7 @@ export interface SignedInBrowserOptions {
   /** The port to listen on, for an extension built to look elsewhere. */
   port?: number;
   /** The extension's id, for one built from another key. */
-  extension?: string;
+  extension?: string | string[];
 }
 
 interface Listener {
@@ -107,9 +109,9 @@ function frames(socket: Duplex, heard: (text: string) => void, closed: () => voi
  * with the reason, and another tab is another call.
  */
 export async function signedInBrowser(options: SignedInBrowserOptions = {}): Promise<Screen & { open(url: string): Promise<void>; close(): Promise<void> }> {
-  const origin = `chrome-extension://${options.extension ?? EXTENSION}`;
+  const origins = new Set((options.extension ? [options.extension].flat() : EXTENSIONS).map((each) => `chrome-extension://${each}`));
   // Firefox and Safari give each install an id of its own, so theirs is known by its kind. No web page can say it is one.
-  const ours = (from: string | undefined): boolean => from === origin || /^(moz-extension|safari-web-extension):\/\//.test(from ?? "");
+  const ours = (from: string | undefined): boolean => origins.has(from ?? "") || /^(moz-extension|safari-web-extension):\/\//.test(from ?? "");
   let line: { say(text: string): void; end(): void } | undefined;
   /** Why the tab can no longer be worked, once it cannot. */
   let gone: string | undefined;

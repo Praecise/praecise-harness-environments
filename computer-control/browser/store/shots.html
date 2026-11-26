@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Praecise Control: store pictures</title>
+<!--
+  Draws the pictures the stores ask for from the extension's own popup: the popup is the
+  real popup.html and popup.js, given a stand-in for the browser's list of tabs.
+  Served over HTTP from the browser/ folder and opened as
+    store/shots.html?shot=offer   1280 by 800: the popup before a tab is offered
+    store/shots.html?shot=using   1280 by 800: the popup while an agent uses a tab
+    store/shots.html?shot=tile    440 by 280: the small tile
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #26333a; background: #edf0f2; display: flex; align-items: center; justify-content: center; }
+  .shot { display: flex; gap: 72px; align-items: center; padding: 0 96px; }
+  .say { max-width: 520px; }
+  .say h1 { font-size: 42px; text-wrap: balance; line-height: 1.08; letter-spacing: -0.02em; margin: 18px 0 18px; font-weight: 650; }
+  .say p { font-size: 20px; margin: 0; color: #4a5a63; }
+  .mark { width: 56px; height: 56px; }
+  .window { width: 344px; background: #f4f4f2; border-radius: 14px; box-shadow: 0 24px 60px rgba(20, 40, 50, 0.22), 0 0 0 1px rgba(20, 40, 50, 0.08); overflow: hidden; }
+  iframe { display: block; width: 344px; height: 250px; border: 0; }
+  .tile { display: flex; gap: 22px; align-items: center; }
+  .tile img { width: 96px; height: 96px; }
+  .tile h1 { font-size: 30px; margin: 0 0 4px; font-weight: 650; letter-spacing: -0.01em; }
+  .tile p { margin: 0; font-size: 15px; color: #4a5a63; max-width: 220px; }
+</style>
+<body>
+<script type="module">
+  const shot = new URLSearchParams(location.search).get("shot") ?? "offer";
+  if (shot === "tile") {
+    document.body.innerHTML = `<div class="tile"><img src="../../assets/icon-256.png" alt=""><div><h1>Praecise Control</h1><p>Let an agent on this computer use one tab you offer it.</p></div></div>`;
+  } else {
+    const using = shot === "using";
+    document.body.innerHTML = `<div class="shot"><div class="say"><img class="mark" src="../../assets/icon-256.png" alt="">
+      <h1>${using ? "It works that tab, on that site, until you stop it." : "You choose the one tab an agent may use."}</h1>
+      <p>${using ? "Press Stop, close the tab or leave the site, and it is cut off." : "Nothing is offered until you press the button. The pages in your other tabs are never read."}</p></div>
+      <div class="window"><iframe title="The extension's popup"></iframe></div></div>`;
+    // What the browser would answer the popup, for the picture.
+    const stand = `<script>{
+      const open = [{ id: 1, windowId: 1, active: true, title: "Orders: Northwind", url: "https://orders.example.com/" }, { id: 2, windowId: 1, active: false, title: "Calendar", url: "https://calendar.example.com/" }, { id: 3, windowId: 1, active: false, title: "Team wiki", url: "https://wiki.example.com/" }];
+      window.chrome = {
+        runtime: { sendMessage: async (message) => (message.type === "state" ? { value: ${using ? '{ origin: "https://orders.example.com", title: "Orders: Northwind" }' : "null"} } : { ok: true }) },
+        windows: { getCurrent: async () => ({ id: 1 }) },
+        tabs: { query: async () => open },
+      };
+    }<\/script>`;
+    const popup = await (await fetch("../extension/popup.html")).text();
+    document.querySelector("iframe").srcdoc = popup.replace("<meta charset", `<base href="${new URL("../extension/", location.href)}">${stand}<meta charset`);
+  }
+</script>
+</body>

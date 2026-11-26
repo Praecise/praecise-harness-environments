@@ -492,5 +492,6 @@ record. It does not keep what was read, typed or pictured.
 - **A press that waits for a person is approved at the computer.** It cannot be
   approved from somewhere else.
 - **The capture sign on Windows and Linux compiles and was not looked at.**
-- **No extension is in a store.**
+- **No extension is in a store.** What each store is given is written out and packaged
+  in `browser/store`; submitting is a person's to do, with their own developer account.
 - **It has not been measured.** The benchmarks to run are listed in FRONTIER.md.
