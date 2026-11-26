@@ -354,10 +354,12 @@ func screenshot(_ params: [String: Any]) throws -> Any {
 
 /// What this program is called. An edition under another name is the same program with another Info.plist.
 let NAME = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Praecise Control"
+/// The folder its files are kept under, which stays the same if an edition is given a new name.
+let STORE = Bundle.main.object(forInfoDictionaryKey: "PraeciseControlStore") as? String ?? NAME
 /// A line saying whose it is, for an edition that carries another name.
 let BY = Bundle.main.object(forInfoDictionaryKey: "PraeciseControlBy") as? String
 
-let RECORDINGS = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/\(NAME)/recordings")
+let RECORDINGS = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/\(STORE)/recordings")
 /// What recordings may take up together, and how long one is kept. Older ones go first.
 let KEPT_BYTES = Int(ProcessInfo.processInfo.environment["PRAECISE_CONTROL_RECORDINGS_BYTES"] ?? "") ?? 2 * 1024 * 1024 * 1024
 let KEPT_SECONDS: TimeInterval = 24 * 3600
@@ -865,7 +867,7 @@ func stdio() {
 
 // MARK: The socket between the app and whatever connects to it
 
-let SUPPORT = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/\(NAME)")
+let SUPPORT = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/\(STORE)")
 let SOCKET = SUPPORT.appendingPathComponent("control.sock").path
 
 func address() -> sockaddr_un {
