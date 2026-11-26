@@ -11,5 +11,5 @@ set OUT=%~1
 if "%OUT%"=="" set OUT=%~dp0
 set REFS=/lib:"%FW%\WPF" /r:UIAutomationClient.dll /r:UIAutomationTypes.dll /r:WindowsBase.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll
 "%FW%\csc.exe" /nologo /optimize+ /platform:x64 /target:exe /out:"%OUT%\praecise-computer-helper.exe" %REFS% "%~dp0Helper.cs" || exit /b 1
-"%FW%\csc.exe" /nologo /optimize+ /platform:x64 /target:winexe /define:TRAY /out:"%OUT%\praecise-control.exe" %REFS% "%~dp0Helper.cs" || exit /b 1
+"%FW%\csc.exe" /nologo /optimize+ /platform:x64 /target:winexe /define:TRAY /win32icon:"%~dp0..\..\assets\praecise-control.ico" /out:"%OUT%\praecise-control.exe" %REFS% "%~dp0Helper.cs" || exit /b 1
 exit /b 0

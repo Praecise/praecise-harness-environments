@@ -724,11 +724,21 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     picture()
   }
 
+  /// The Praecise mark in one colour, which the menu bar tints for itself: a square, its left half open.
   func picture() {
-    let image = NSImage(systemSymbolName: paused ? "pause.circle" : "cursorarrow.rays", accessibilityDescription: paused ? "Praecise Control, paused" : "Praecise Control")
-    image?.isTemplate = true
+    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+      let box = NSRect(x: 2, y: 2, width: 14, height: 14)
+      NSColor.black.setFill()
+      box.fill()
+      NSColor.clear.setFill()
+      NSRect(x: box.minX + 1.5, y: box.minY + 1.5, width: box.width / 2 - 1.5, height: box.height - 3).fill(using: .copy)
+      return true
+    }
+    image.isTemplate = true
+    image.accessibilityDescription = paused ? "Praecise Control, paused" : "Praecise Control"
     item.button?.image = image
-    if image == nil { item.button?.title = "Praecise" }
+    // Dimmed while it is paused.
+    item.button?.appearsDisabled = paused
   }
 
   func add(_ title: String, _ action: Selector?, to menu: NSMenu) {

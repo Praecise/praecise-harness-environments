@@ -867,7 +867,7 @@ static class Tray {
       if (!first) return 0;
       Helper.Serve();
       System.Windows.Forms.Application.EnableVisualStyles();
-      var icon = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Application, Text = "Praecise Control", Visible = true };
+      var icon = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location), Text = "Praecise Control", Visible = true };
       var menu = new System.Windows.Forms.ContextMenuStrip();
       // Built as it is opened, so it says what is true now.
       menu.Opening += delegate {

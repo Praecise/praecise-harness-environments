@@ -13,7 +13,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-"$here"}
 app="$out/Praecise Control.app"
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp "$here/../../assets/praecise-control.icns" "$app/Contents/Resources/praecise-control.icns"
 cp "$here/Info.plist" "$app/Contents/Info.plist"
 made=$(mktemp -d)
 trap 'rm -rf "$made"' EXIT

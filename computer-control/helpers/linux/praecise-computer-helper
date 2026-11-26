@@ -819,7 +819,8 @@ def app():
         try:
             gi.require_version(library, "0.1")
             indicator = getattr(__import__("gi.repository", fromlist=[library]), library)
-            icon = indicator.Indicator.new("praecise-control", "input-mouse", indicator.IndicatorCategory.APPLICATION_STATUS)
+            mark = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "mark-48.png")
+            icon = indicator.Indicator.new("praecise-control", mark if os.path.exists(mark) else "input-mouse", indicator.IndicatorCategory.APPLICATION_STATUS)
             icon.set_title("Praecise Control")
             icon.set_status(indicator.IndicatorStatus.ACTIVE)
             icon.set_menu(menu)
