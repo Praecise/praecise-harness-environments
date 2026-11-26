@@ -207,9 +207,69 @@ Tried in a real Chromium with `tests/browser-real.test.ts`: offered from the
 extension's own popup, read, filled, pressed, pictured, refused another site, and cut
 off when stopped. Each step took well under a second.
 
-It is loaded unpacked for now (chrome://extensions, Developer mode, Load unpacked). It
-is not in the Chrome Web Store, and there is no Safari or Firefox extension yet;
-neither of those browsers has the debugger this one rests on.
+It is loaded unpacked for now (chrome://extensions, Developer mode, Load unpacked).
+
+### Firefox and Safari
+
+[browser/extension-page](browser/extension-page/) is Praecise Control for the browsers
+that give an extension no debugger. It asks for nothing in advance: opening it on a tab
+and pressing "Use this tab" is what lets it into that tab, on that site. It reads the
+page from inside it, as a screen reader would be told of it, and acts with the events a
+page script can make. `signedInBrowser()` is the same call.
+
+What differs from Chrome:
+
+- A click, a filled field and a chosen option do what a person's would. A key does
+  not, so the keys with an obvious meaning are carried out by hand (Return submits a
+  form or presses what has the focus, Tab moves on, Backspace deletes, select all
+  selects), and any other chord is refused.
+- A drag is refused.
+- A picture needs the tab to be the one in front in its window.
+- What a password field holds is never read.
+- It reads into a component's own tree where the page leaves that open.
+
+Tried in a real Firefox 158 through geckodriver (`tests/firefox-real.test.ts`) and in a
+real Chromium (`tests/browser-page-real.test.ts`).
+
+## From Claude Code, Codex and other clients
+
+`mcp.mjs` serves Praecise Control to a client that speaks MCP. The client is given the
+apps as tools: `computer_control_accounts`, `computer_control_elements`,
+`computer_control_screen` and `computer_control_open`. A screenshot arrives as an image.
+Everything is still held to each app's mode.
+
+Set it up once, in a folder of its own:
+
+```sh
+cp -r node_modules/@praecise/harness-environments/computer-control/app praecise-control && cd praecise-control
+npm install
+export PRAECISE_CONTROL_APPS="TextEdit,Numbers"
+npx praecise computer-control doctor
+npx praecise computer-control connect && npx praecise computer-control sync
+npx praecise computer-control mode textedit draft
+```
+
+Then tell the client to start `node <folder>/node_modules/@praecise/harness-environments/computer-control/mcp.mjs <folder>`,
+with `PRAECISE_CONTROL_APPS` in its environment. Each client's own way of saying that,
+from its documentation as read on 26 Nov 2026:
+
+| Client | How |
+|---|---|
+| Claude Code | `claude mcp add --env PRAECISE_CONTROL_APPS=TextEdit,Numbers praecise-control -- node <path>/mcp.mjs <folder>`. Tried with 2.1.323 and 2.1.332: connected |
+| Codex | `codex mcp add praecise-control --env PRAECISE_CONTROL_APPS=TextEdit,Numbers -- node <path>/mcp.mjs <folder>`, or `[mcp_servers.praecise-control]` with `command`, `args` and an `env` table in `~/.codex/config.toml`. Not tried |
+| Cursor | `.cursor/mcp.json` or `~/.cursor/mcp.json`: `{"mcpServers":{"praecise-control":{"command":"node","args":["<path>/mcp.mjs","<folder>"],"env":{"PRAECISE_CONTROL_APPS":"TextEdit,Numbers"}}}}`. Not tried |
+| VS Code | "MCP: Add Server" in the Command Palette, then "Command (stdio)". Not tried |
+| Gemini CLI | `gemini mcp add -e PRAECISE_CONTROL_APPS=TextEdit,Numbers praecise-control node <path>/mcp.mjs <folder>`, or the same `mcpServers` shape in `~/.gemini/settings.json`. Not tried |
+
+Why there is a file for this at all: praecise-harness speaks the current revision of
+MCP (2026-07-28) and no earlier one, and these clients still open with the earlier
+handshake. Claude Code 2.1.332, the latest on the day, was refused by `praecise mcp`
+and connected through `mcp.mjs`. `mcp.mjs` answers the handshake and passes each
+request to the app unchanged; the harness is as it was.
+
+A press that needs a person is refused over MCP with a line saying so. The client's own
+question before a tool call is a person agreeing, but the environment does not hear
+it, so today such a press is allowed for an app only by waiving it for that app.
 
 ## What is not done
 
@@ -224,5 +284,10 @@ neither of those browsers has the debugger this one rests on.
   Windows and Linux it was, through each app.
 - **It needs a harness later than 1.2.1**, for `elements()` and for an action whose
   kind depends on the call. Both are on the harness's main branch and not on npm.
-- **Safari and Firefox extensions, and the extension in a store.**
+- **The Safari app is not built.** Its project is in `browser/safari`, made by Apple's
+  converter from `browser/extension-page`. The Mac was too busy to build it.
+- **The Firefox and Safari extension's own button was not pressed.** It was tried in a
+  real Firefox and a real Chromium with the extension let into every page in advance;
+  the press that lets it into one tab cannot be made by a test.
+- **No extension is in a store.**
 - **It has not been measured.** The benchmarks to run are listed in FRONTIER.md.
