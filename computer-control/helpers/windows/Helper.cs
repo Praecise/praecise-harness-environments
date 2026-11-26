@@ -1161,11 +1161,14 @@ static class Tray {
       Helper.Serve();
       System.Windows.Forms.Application.EnableVisualStyles();
       var icon = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location), Text = "Praecise Control", Visible = true };
-      var menu = new System.Windows.Forms.ContextMenuStrip();
+      // The system's own menu, drawn by whichever Windows this is in the way that Windows draws menus.
+      var menu = new System.Windows.Forms.ContextMenu();
       // Built as it is opened, so it says what is true now.
-      menu.Opening += delegate {
-        menu.Items.Clear();
-        Action<string> say = text => { menu.Items.Add(text).Enabled = false; };
+      menu.Popup += delegate {
+        menu.MenuItems.Clear();
+        Action<string> say = text => { menu.MenuItems.Add(new System.Windows.Forms.MenuItem(text) { Enabled = false }); };
+        Action<string, Action> offer = (text, press) => { menu.MenuItems.Add(new System.Windows.Forms.MenuItem(text, delegate { press(); })); };
+        Action line = () => { menu.MenuItems.Add(new System.Windows.Forms.MenuItem("-")); };
         List<Helper.Session> joined;
         lock (Helper.Sessions) joined = new List<Helper.Session>(Helper.Sessions);
         var kept = Helper.Kept();
@@ -1175,36 +1178,50 @@ static class Tray {
         // Who is connected.
         say(Helper.Paused ? "Paused: agents are refused" : joined.Count == 0 ? "No agent is connected" : joined.Count == 1 ? "1 agent is connected" : joined.Count + " agents are connected");
         foreach (var each in joined) say("    " + (each.App == "" ? "has not used an app yet" : "using " + each.App + ", " + Ago(each.Last)) + ", connected " + Ago(each.Since));
-        menu.Items.Add(Helper.Paused ? "Resume" : "Pause", null, delegate { Helper.Paused = !Helper.Paused; icon.Text = Helper.Paused ? "Praecise Control, paused" : "Praecise Control"; });
+        offer(Helper.Paused ? "Resume" : "Pause", () => { Helper.Paused = !Helper.Paused; icon.Text = Helper.Paused ? "Praecise Control, paused" : "Praecise Control"; });
         // Closed from this end. A harness that is still wanted connects again by itself.
-        if (joined.Count > 0) menu.Items.Add("Disconnect All", null, delegate { foreach (var each in joined) { try { each.Line.Dispose(); } catch (Exception) { } } });
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        if (joined.Count > 0) offer("Disconnect All", () => { foreach (var each in joined) { try { each.Line.Dispose(); } catch (Exception) { } } });
+        line();
 
         // What is kept.
         say(kept.Count == 0 ? "No recordings are kept" : kept.Count + " recording" + (kept.Count == 1 ? "" : "s") + " kept, " + Size(bytes) + " of " + Size(Helper.KeptBytes) + " allowed");
         if (kept.Count > 0) {
-          menu.Items.Add("Show Recordings", null, delegate { System.Diagnostics.Process.Start("explorer.exe", "\"" + Helper.Recordings + "\""); });
-          menu.Items.Add("Delete All Recordings...", null, delegate {
-            var sure = System.Windows.Forms.MessageBox.Show("They are removed from this computer and cannot be brought back. A recording that is still running is kept.", "Delete all recordings?", System.Windows.Forms.MessageBoxButtons.OKCancel, System.Windows.Forms.MessageBoxIcon.Warning, System.Windows.Forms.MessageBoxDefaultButton.Button2);
-            if (sure == System.Windows.Forms.DialogResult.OK) Helper.Quietly(() => Helper.Clear(new Dictionary<string, object> { {"what", "recordings"} }));
+          offer("Show Recordings", () => { System.Diagnostics.Process.Start("explorer.exe", "\"" + Helper.Recordings + "\""); });
+          offer("Delete All Recordings...", () => {
+            if (Sure("Delete all recordings?", "They are removed from this computer and cannot be brought back. A recording that is still running is kept.")) {
+              Helper.Quietly(() => Helper.Clear(new Dictionary<string, object> { {"what", "recordings"} }));
+            }
           });
         }
         var read = Helper.Remembered;
         say(read == 0 ? "Nothing is remembered of any window" : read + " thing" + (read == 1 ? "" : "s") + " remembered from windows");
-        if (read > 0) menu.Items.Add("Clear Cache", null, delegate { Helper.Quietly(() => Helper.Clear(new Dictionary<string, object> { {"what", "cache"} })); });
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        if (read > 0) offer("Clear Cache", () => { Helper.Quietly(() => Helper.Clear(new Dictionary<string, object> { {"what", "cache"} })); });
+        line();
 
-        var starts = new System.Windows.Forms.ToolStripMenuItem("Start when I sign in") { Checked = Starts() };
-        starts.Click += delegate { Start(!Starts()); };
-        menu.Items.Add(starts);
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Quit Praecise Control", null, delegate { icon.Visible = false; System.Windows.Forms.Application.Exit(); });
+        menu.MenuItems.Add(new System.Windows.Forms.MenuItem("Start when I sign in", delegate { Start(!Starts()); }) { Checked = Starts() });
+        line();
+        offer("Quit Praecise Control", () => { icon.Visible = false; System.Windows.Forms.Application.Exit(); });
       };
-      icon.ContextMenuStrip = menu;
+      icon.ContextMenu = menu;
       System.Windows.Forms.Application.Run();
       icon.Dispose();
       return 0;
     }
+  }
+
+  [DllImport("comctl32.dll", CharSet = CharSet.Unicode, EntryPoint = "TaskDialog")]
+  static extern int TaskDialog(IntPtr owner, IntPtr instance, string title, string heading, string body, int buttons, IntPtr icon, out int pressed);
+
+  /// Ask before something that cannot be undone, in the system's own question box where it has one.
+  static bool Sure(string heading, string body) {
+    try {
+      int pressed;
+      // OK and Cancel, with the warning sign.
+      if (TaskDialog(IntPtr.Zero, IntPtr.Zero, "Praecise Control", heading, body, 0x0001 | 0x0008, new IntPtr(0xFFFF), out pressed) == 0) return pressed == 1;
+    } catch (EntryPointNotFoundException) {
+    } catch (DllNotFoundException) {
+    }
+    return System.Windows.Forms.MessageBox.Show(body, heading, System.Windows.Forms.MessageBoxButtons.OKCancel, System.Windows.Forms.MessageBoxIcon.Warning, System.Windows.Forms.MessageBoxDefaultButton.Button2) == System.Windows.Forms.DialogResult.OK;
   }
 
   static string Size(long bytes) {

@@ -1005,16 +1005,6 @@ def app():
         os.makedirs(RECORDINGS, mode=0o700, exist_ok=True)
         subprocess.Popen(["xdg-open", RECORDINGS], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def delete():
-        sure = Gtk.MessageDialog(message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.NONE, text="Delete all recordings?")
-        sure.format_secondary_text("They are removed from this computer and cannot be brought back. A recording that is still running is kept.")
-        sure.add_button("Cancel", Gtk.ResponseType.CANCEL)
-        sure.add_button("Delete", Gtk.ResponseType.OK)
-        agreed = sure.run() == Gtk.ResponseType.OK
-        sure.destroy()
-        if agreed:
-            clear({"what": "recordings"})
-
     def rebuild(*_):
         for item in menu.get_children():
             menu.remove(item)
@@ -1034,7 +1024,14 @@ def app():
         entry("No recordings are kept" if not all_kept else "%d recording%s kept, %s of %s allowed" % (len(all_kept), "" if len(all_kept) == 1 else "s", size(sum(one["bytes"] for one in all_kept)), size(KEPT_BYTES)))
         if all_kept:
             entry("Show Recordings", reveal)
-            entry("Delete All Recordings…", delete)
+            # Asked for twice, in the menu the desktop itself draws: once to open this, once to mean it.
+            sure = Gtk.MenuItem(label="Delete All Recordings")
+            inner = Gtk.Menu()
+            really = Gtk.MenuItem(label="Delete %d recording%s; they cannot be brought back" % (len(all_kept), "" if len(all_kept) == 1 else "s"))
+            really.connect("activate", lambda _item: (clear({"what": "recordings"}), rebuild()))
+            inner.append(really)
+            sure.set_submenu(inner)
+            menu.append(sure)
         entry("Nothing is remembered of any window" if not refs else "%d thing%s remembered from windows" % (len(refs), "" if len(refs) == 1 else "s"))
         if refs:
             entry("Clear Cache", lambda: clear({"what": "cache"}))

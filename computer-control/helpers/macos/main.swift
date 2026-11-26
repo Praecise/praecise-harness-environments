@@ -1003,9 +1003,10 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     item.button?.appearsDisabled = paused
   }
 
-  func add(_ title: String, _ action: Selector?, to menu: NSMenu) {
+  func add(_ title: String, _ action: Selector?, to menu: NSMenu, symbol: String? = nil) {
     let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
     entry.target = self
+    if let symbol { entry.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
     menu.addItem(entry)
   }
 
@@ -1021,28 +1022,30 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let (joined, all, read): ([Session], [(name: String, bytes: Int, at: Date)], Int) = work.sync { (sessions.values.sorted { $0.since < $1.since }, kept(), refs.count) }
 
     // Who is connected.
+    menu.addItem(.sectionHeader(title: "Agents"))
     add(paused ? "Paused: agents are refused" : joined.isEmpty ? "No agent is connected" : joined.count == 1 ? "1 agent is connected" : "\(joined.count) agents are connected", nil, to: menu)
     for each in joined {
       add("    \(each.app.isEmpty ? "has not used an app yet" : "using \(each.app), \(ago(each.last))"), connected \(ago(each.since))", nil, to: menu)
     }
-    add(paused ? "Resume" : "Pause", #selector(pause), to: menu)
-    if !joined.isEmpty { add("Disconnect All", #selector(disconnect), to: menu) }
-    menu.addItem(.separator())
+    add(paused ? "Resume" : "Pause", #selector(pause), to: menu, symbol: paused ? "play.circle" : "pause.circle")
+    if !joined.isEmpty { add("Disconnect All", #selector(disconnect), to: menu, symbol: "xmark.circle") }
 
     // What is kept.
+    menu.addItem(.sectionHeader(title: "Stored on This Mac"))
     add(all.isEmpty ? "No recordings are kept" : "\(all.count) recording\(all.count == 1 ? "" : "s") kept, \(size(all.reduce(0) { $0 + $1.bytes })) of \(size(KEPT_BYTES)) allowed", nil, to: menu)
     if !all.isEmpty {
-      add("Show Recordings in Finder", #selector(reveal), to: menu)
-      add("Delete All Recordings…", #selector(deleteRecordings), to: menu)
+      add("Show Recordings in Finder", #selector(reveal), to: menu, symbol: "folder")
+      add("Delete All Recordings…", #selector(deleteRecordings), to: menu, symbol: "trash")
     }
     add(read == 0 ? "Nothing is remembered of any window" : "\(read) thing\(read == 1 ? "" : "s") remembered from windows", nil, to: menu)
-    if read > 0 { add("Clear Cache", #selector(forget), to: menu) }
-    menu.addItem(.separator())
+    if read > 0 { add("Clear Cache", #selector(forget), to: menu, symbol: "eraser") }
 
-    add(AXIsProcessTrusted() ? "Accessibility: allowed" : "Allow Accessibility…", AXIsProcessTrusted() ? nil : #selector(accessibility), to: menu)
-    add(CGPreflightScreenCaptureAccess() ? "Screen Recording: allowed" : "Allow Screen Recording…", CGPreflightScreenCaptureAccess() ? nil : #selector(recording), to: menu)
+    menu.addItem(.sectionHeader(title: "Permissions"))
+
+    add(AXIsProcessTrusted() ? "Accessibility: allowed" : "Allow Accessibility…", AXIsProcessTrusted() ? nil : #selector(accessibility), to: menu, symbol: AXIsProcessTrusted() ? "checkmark.circle" : "accessibility")
+    add(CGPreflightScreenCaptureAccess() ? "Screen Recording: allowed" : "Allow Screen Recording…", CGPreflightScreenCaptureAccess() ? nil : #selector(recording), to: menu, symbol: CGPreflightScreenCaptureAccess() ? "checkmark.circle" : "record.circle")
     menu.addItem(.separator())
-    add("Quit Praecise Control", #selector(quit), to: menu)
+    add("Quit Praecise Control", #selector(quit), to: menu, symbol: "power")
   }
 
   @objc func pause() {
