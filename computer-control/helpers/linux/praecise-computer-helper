@@ -11,7 +11,15 @@
 # is working in it. On Wayland they need the RemoteDesktop portal, and a picture needs
 # the ScreenCast portal; neither is built here, and both are refused there.
 #
-# Needs: python3-gi, gir1.2-atspi-2.0, and gir1.2-gtk-3.0 for pictures on X11.
+# It runs three ways. With --app, as Praecise Control: it stays in the desktop session
+# with an icon in the panel where the desktop has a place for one, answers on a socket
+# only this user can open, says what an agent is using, and can be paused. With
+# connect: it passes its input to that app and the app's answers back, which is how a
+# harness reaches it from outside the session. With neither, it answers on its own
+# input and output where it stands.
+#
+# Needs: python3-gi, gir1.2-atspi-2.0, and gir1.2-gtk-3.0 for pictures on X11 and for the
+# app. The icon uses gir1.2-ayatanaappindicator3-0.1 where it is installed.
 
 import base64
 import getpass
@@ -21,6 +29,8 @@ import shlex
 import socket
 import subprocess
 import sys
+import threading
+import time
 import warnings
 
 # The older of two names for one call is still the only one some systems have.
@@ -635,22 +645,180 @@ METHODS = {
     "key": key, "cursor": cursor,
 }
 
-for line in sys.stdin:
+paused = False
+last = {"app": "", "at": 0.0}
+
+
+def handle(line):
+    """One line in, one line out."""
     try:
         asked = json.loads(line)
         ident = asked["id"]
     except Exception:
-        continue
+        return None
     try:
-        method = METHODS.get(asked.get("method"))
+        name = asked.get("method")
+        params = asked.get("params") or {}
+        method = METHODS.get(name)
         if method is None:
-            raise Failure("this helper cannot %s" % asked.get("method"))
-        if Atspi is None and asked.get("method") != "hello":
+            raise Failure("this helper cannot %s" % name)
+        if paused and name != "hello":
+            raise Failure("Praecise Control is paused by the person at this machine")
+        if Atspi is None and name != "hello":
             raise Failure("the accessibility bindings are missing: %s" % ATSPI)
-        answer = {"id": ident, "result": method(asked.get("params") or {})}
+        if params.get("app"):
+            last["app"], last["at"] = str(params["app"]), time.time()
+        answer = {"id": ident, "result": method(params)}
     except Failure as failure:
         answer = {"id": ident, "error": str(failure)}
     except Exception as err:
         answer = {"id": ident, "error": "%s: %s" % (type(err).__name__, err)}
-    sys.stdout.write(json.dumps(answer) + "\n")
-    sys.stdout.flush()
+    return json.dumps(answer)
+
+
+def stdio():
+    for line in sys.stdin:
+        answer = handle(line)
+        if answer is not None:
+            sys.stdout.write(answer + "\n")
+            sys.stdout.flush()
+
+
+SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or os.path.expanduser("~/.cache"), "praecise-control.sock")
+
+
+def relay():
+    """Pass this program's input to the app and the app's answers back."""
+    joined = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        joined.connect(SOCKET)
+    except OSError:
+        sys.stderr.write("Praecise Control is not running in the desktop session; start it there with --app\n")
+        sys.exit(69)
+
+    def back():
+        with joined.makefile("r", encoding="utf-8") as answers:
+            for answer in answers:
+                sys.stdout.write(answer)
+                sys.stdout.flush()
+
+    reading = threading.Thread(target=back, daemon=True)
+    reading.start()
+    for line in sys.stdin:
+        joined.sendall(line.encode("utf-8"))
+    # Nothing more will be asked. What was asked is still answered before this ends.
+    joined.shutdown(socket.SHUT_WR)
+    reading.join()
+
+
+def app():
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import GLib, Gtk
+
+    try:
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        probe.connect(SOCKET)
+        probe.close()
+        sys.stderr.write("Praecise Control is already running\n")
+        sys.exit(0)
+    except OSError:
+        pass
+    try:
+        os.unlink(SOCKET)
+    except OSError:
+        pass
+    listening = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    previous = os.umask(0o177)  # only this user can open it
+    try:
+        listening.bind(SOCKET)
+    finally:
+        os.umask(previous)
+    listening.listen(8)
+
+    def on_main(line):
+        """Everything is asked of the desktop from the one thread that owns the session's connection."""
+        done = threading.Event()
+        said = []
+
+        def run():
+            said.append(handle(line))
+            done.set()
+            return False
+
+        GLib.idle_add(run)
+        done.wait()
+        return said[0]
+
+    def each(joined):
+        with joined, joined.makefile("r", encoding="utf-8") as asked:
+            for line in asked:
+                answer = on_main(line)
+                if answer is not None:
+                    try:
+                        joined.sendall((answer + "\n").encode("utf-8"))
+                    except OSError:
+                        return
+
+    def accept():
+        while True:
+            joined, _ = listening.accept()
+            threading.Thread(target=each, args=(joined,), daemon=True).start()
+
+    threading.Thread(target=accept, daemon=True).start()
+
+    menu = Gtk.Menu()
+
+    def rebuild(*_):
+        global paused
+        for item in menu.get_children():
+            menu.remove(item)
+        recent = time.time() - last["at"] < 60
+        state = Gtk.MenuItem(label="Paused: agents are refused" if paused else "An agent is using %s" % last["app"] if recent else "No agent is using this computer")
+        state.set_sensitive(False)
+        toggle = Gtk.MenuItem(label="Resume" if paused else "Pause")
+
+        def flip(_item):
+            global paused
+            paused = not paused
+            rebuild()
+
+        toggle.connect("activate", flip)
+        leave = Gtk.MenuItem(label="Quit Praecise Control")
+        leave.connect("activate", lambda _item: Gtk.main_quit())
+        for item in (state, toggle, Gtk.SeparatorMenuItem(), leave):
+            menu.append(item)
+        menu.show_all()
+
+    rebuild()
+    # What the menu says is true when it is opened.
+    menu.connect("show", lambda *_: GLib.idle_add(rebuild) and None)
+    shown = False
+    for library in ("AyatanaAppIndicator3", "AppIndicator3"):
+        try:
+            gi.require_version(library, "0.1")
+            indicator = getattr(__import__("gi.repository", fromlist=[library]), library)
+            icon = indicator.Indicator.new("praecise-control", "input-mouse", indicator.IndicatorCategory.APPLICATION_STATUS)
+            icon.set_title("Praecise Control")
+            icon.set_status(indicator.IndicatorStatus.ACTIVE)
+            icon.set_menu(menu)
+            shown = True
+            break
+        except Exception:
+            continue
+    if not shown:
+        sys.stderr.write("Praecise Control is running with no icon: this desktop has no place for one, or the indicator library is not installed\n")
+    try:
+        Gtk.main()
+    finally:
+        try:
+            os.unlink(SOCKET)
+        except OSError:
+            pass
+
+
+if "connect" in sys.argv[1:]:
+    relay()
+elif "--app" in sys.argv[1:]:
+    app()
+else:
+    stdio()
