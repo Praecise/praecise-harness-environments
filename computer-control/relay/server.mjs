@@ -27,7 +27,8 @@ const ADDRESS = (process.env.CONTROL_ADDRESS ?? "").replace(/\/+$/, "");
 const ISSUER = (process.env.CONTROL_ISSUER ?? "https://accounts.praecise.com").replace(/\/+$/, "");
 const SECRET = process.env.CONTROL_CLAIMS_HOOK_SECRET ?? "";
 const PORT = Number(process.env.PORT) > 0 ? Number(process.env.PORT) : 8080;
-if (!ADDRESS) throw new Error("CONTROL_ADDRESS is this relay's public address and is not set");
+// Without its address or its secret it starts, says so, and passes nothing: it is put in place first and told these after.
+const READY = Boolean(ADDRESS && SECRET);
 
 /** How long an assistant waits for a computer to answer one request. */
 const PATIENCE = 90_000;
@@ -271,10 +272,12 @@ function hook(body, signature) {
 
 const server = createServer((request, response) => {
   const say = (status, body, more = {}) => response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...more }).end(body === undefined ? "" : JSON.stringify(body));
-  const path = new URL(request.url ?? "/", ADDRESS).pathname;
+  const path = new URL(request.url ?? "/", ADDRESS || "http://unset").pathname;
   const metadata = `${ADDRESS}/.well-known/oauth-protected-resource`;
 
-  if (request.method === "GET" && path === "/healthz") return say(200, { ok: true });
+  if (request.method === "GET" && path === "/healthz") return say(200, { ok: true, ready: READY });
+  if (request.method === "GET" && path === "/") return say(200, { name: "Praecise Control", mcp: `${ADDRESS}/mcp`, about: "The public route to the apps a person allowed on a computer of theirs. An assistant is let in by that person, with their Praecise account." });
+  if (!READY) return say(503, { error: "this relay has not been given its address and its secret yet" });
   if (request.method === "GET" && (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp")) {
     return say(200, { resource: ADDRESS, authorization_servers: [ISSUER], scopes_supported: ["control:use"], bearer_methods_supported: ["header"], resource_name: "Praecise Control" });
   }
@@ -332,7 +335,7 @@ const server = createServer((request, response) => {
   });
 });
 server.on("upgrade", (request, socket) => {
-  if (new URL(request.url ?? "/", ADDRESS).pathname !== "/host") return socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
+  if (!READY || new URL(request.url ?? "/", ADDRESS).pathname !== "/host") return socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
   host(request, socket);
 });
-server.listen(PORT, process.env.HOST ?? "127.0.0.1", () => process.stderr.write(`praecise-control-relay: ${ADDRESS}, checking tokens of ${ISSUER}, on port ${PORT}\n`));
+server.listen(PORT, process.env.HOST ?? "127.0.0.1", () => process.stderr.write(READY ? `praecise-control-relay: ${ADDRESS}, checking tokens of ${ISSUER}, on port ${PORT}\n` : `praecise-control-relay: on port ${PORT}, passing nothing until CONTROL_ADDRESS and CONTROL_CLAIMS_HOOK_SECRET are set\n`));
