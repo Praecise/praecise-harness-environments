@@ -310,7 +310,7 @@ Each client's own way of being told, from its documentation as read on 26 Nov 20
 | VS Code | "MCP: Add Server" in the Command Palette, then "Command (stdio)". Not tried |
 | Gemini CLI | `gemini mcp add -e PRAECISE_CONTROL_APPS=TextEdit,Numbers praecise-control node <path>/mcp.mjs <folder>`, or the same `mcpServers` shape in `~/.gemini/settings.json`. Not tried |
 | A Tenzro node, or anything else on the current revision | `<front>` or `<front> --http`. Tried with requests made the way that revision makes them, not with a Tenzro node |
-| ChatGPT | Not reachable as this stands. ChatGPT calls from OpenAI's side, so it needs an address on the public internet over HTTPS, with OAuth or nothing in front of it. This listens on this machine only, on purpose. See below |
+| ChatGPT, and any assistant that calls from somewhere else | The public route, below: the assistant is given `https://praecise-control.app.praecise.cloud/mcp` and the person signs in with their Praecise account. Not tried with ChatGPT itself |
 
 Why there is a file for this at all: praecise-harness speaks the current revision of
 MCP and no earlier one, and most clients still open with the earlier handshake. Claude
@@ -318,10 +318,49 @@ Code 2.1.332, the latest on the day, was refused by `praecise mcp` and connected
 `mcp.mjs`. `mcp.mjs` answers the handshake and passes each request to the app
 unchanged; the harness is as it was.
 
-**ChatGPT, and anything else that calls from somewhere else.** Putting the control of a
-person's computer at a public address is a decision, not a setting. It wants a sign-in
-of the person's own in front of it, and a way to that machine that the person opened.
-Neither is built here.
+### The public route
+
+For an assistant that is not on the computer, nothing is opened on the computer. The
+computer connects out to a relay and stays connected, the assistant calls the relay,
+and the relay passes each request to that computer and the answer back.
+
+```sh
+<front> --cloud
+```
+
+That signs the person in with their Praecise account, in their own browser, and
+connects this computer to `https://praecise-control.app.praecise.cloud`. Stopping the
+program ends it. The sign-in is kept in the keychain on a Mac, or in a sealed file
+under `PRAECISE_VAULT_KEY` anywhere else.
+
+The assistant is then given `https://praecise-control.app.praecise.cloud/mcp`. It finds
+where to send its person from there, the person signs in to their Praecise account,
+and the consent page lists that person's connected computers. The one they pick is
+the only one that assistant's token is good for.
+
+What holds it:
+
+- **The person's account decides.** An assistant has a token the person gave it, for
+  one computer. The computer has a token of the person's own. The relay checks both
+  against the account service's keys, and passes nothing between two different people.
+- **The relay keeps nothing.** No request, answer or picture is written anywhere on it,
+  and when the computer disconnects there is nothing of it left there.
+- **The app still decides.** A request that arrives this way is held to each app's mode
+  exactly as one made on the computer is.
+- **It ends where the person ends it:** stopping the program, or ending the assistant's
+  connection on their account page.
+
+The relay is `relay/server.mjs`, with nothing to install beside Node, and runs as the
+site `praecise-control` on Praecise Cloud. The account service knows it as the service
+"Praecise Control". Anyone can run a relay of their own against an account service of
+their own: it needs its address, the account service's, and a secret the two share.
+
+Tried: the whole route against a stand-in for the account service
+(`tests/control-relay.test.ts`), and the account service's own consent flow with the
+relay's question (its tests). The live relay answers the account service's signed
+question and refuses an unsigned one, and the live account service leads the
+computer's program to its sign-in. Not tried: a person signing in and an assistant
+reaching their computer through the live route, and ChatGPT itself.
 
 A press that needs a person is refused over MCP with a line saying so. The harness does
 not take an approval over MCP, on purpose: a message from a client must not be what

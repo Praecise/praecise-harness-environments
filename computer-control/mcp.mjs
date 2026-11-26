@@ -5,7 +5,7 @@
 //   node mcp.mjs [folder] --http [port]    speak MCP over HTTP on this machine only (17346 unless said)
 //   node mcp.mjs [folder] --cloud [address]
 //                                          connect this computer to Praecise Control's public route, for an
-//                                          assistant that calls from somewhere else (https://control.praecise.com unless said)
+//                                          assistant that calls from somewhere else (https://praecise-control.app.praecise.cloud unless said)
 //   node mcp.mjs [folder] --tools openai   print the tools as OpenAI function definitions
 //   node mcp.mjs [folder] --call <tool> '<arguments as JSON>'
 //                                          make one call and print what came back
@@ -129,7 +129,7 @@ if (flag("--call") >= 0) {
 
 if (flag("--cloud") >= 0) {
   const said = args[flag("--cloud") + 1];
-  const address = (said && /^https?:\/\//.test(said) ? said : "https://control.praecise.com").replace(/\/+$/, "");
+  const address = (said && /^https?:\/\//.test(said) ? said : "https://praecise-control.app.praecise.cloud").replace(/\/+$/, "");
   const state = join(root, ".praecise");
   mkdirSync(state, { recursive: true });
   // This computer's own name for itself at the relay, made once.
