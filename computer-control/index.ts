@@ -73,6 +73,13 @@ interface Window {
   title?: string;
 }
 
+type Held = { ref?(): void; unref?(): void };
+const each = (child: ReturnType<typeof spawn>): Held[] => [child as Held, child.stdin as Held | null, child.stdout as Held | null].filter((one): one is Held => one !== null);
+/** Let this program end while the helper is running. */
+const idle = (child: ReturnType<typeof spawn>): void => each(child).forEach((one) => one.unref?.());
+/** Keep this program going while the helper is being asked something. */
+const busy = (child: ReturnType<typeof spawn>): void => each(child).forEach((one) => one.ref?.());
+
 /** A helper started as a program, spoken to in lines of JSON. */
 export function helperProcess(command: string[], timeoutMs = 30_000): Helper {
   let child: ReturnType<typeof spawn> | undefined;
@@ -97,6 +104,9 @@ export function helperProcess(command: string[], timeoutMs = 30_000): Helper {
     started.on("exit", (code) => end(new Error(`the helper ${command[0]} stopped (${String(code)})`)));
     // Written to after it has gone, a pipe says so here and not as a crash.
     started.stdin!.on("error", () => undefined);
+    // The helper is kept for as long as something is waiting on it, and no longer: a program that has
+    // finished is not held open by a helper it is no longer asking anything of.
+    idle(started);
     createInterface({ input: started.stdout! }).on("line", (line) => {
       let answer: { id?: number; result?: unknown; error?: string };
       try {
@@ -107,6 +117,7 @@ export function helperProcess(command: string[], timeoutMs = 30_000): Helper {
       const asked = typeof answer.id === "number" ? waiting.get(answer.id) : undefined;
       if (!asked) return;
       waiting.delete(answer.id!);
+      if (!waiting.size) idle(started);
       clearTimeout(asked.timer);
       if (typeof answer.error === "string") asked.reject(new Error(answer.error));
       else asked.resolve(answer.result);
@@ -127,6 +138,7 @@ export function helperProcess(command: string[], timeoutMs = 30_000): Helper {
           reject(new Error(`the helper did not answer ${method} in time`));
         }, timeoutMs);
         waiting.set(id, { resolve, reject, timer });
+        busy(to);
         to.stdin!.write(`${JSON.stringify({ id, method, params })}\n`);
       });
     },
