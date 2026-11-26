@@ -231,6 +231,47 @@ In the ready app (`app/`), the same things are set by `PRAECISE_CONTROL_FOLDERS`
 `PRAECISE_CONTROL_CODE`, `PRAECISE_CONTROL_CAMERA=1` and
 `PRAECISE_CONTROL_MICROPHONE=1`.
 
+## The app that connects itself
+
+Built with a runtime inside it, the Mac app does without the command line. Its menu
+gains a section, **This Computer**:
+
+- **Connect This Computer…** signs you in with your Praecise account, in your browser,
+  and keeps the computer connected to the public route while the app runs.
+  **Disconnect This Computer** ends it.
+- **Apps** lists the apps that are open, to tick the ones an agent may be shown.
+- **Folders** and **Folders for Coding Agents** are added with the system's own folder
+  chooser, and removed by unticking.
+- **Camera** and **Microphone** are each a tick.
+- **What May Be Done** sets each one's mode: look only, work in it, or work in it and
+  ask before sending.
+
+What you choose is kept in the app's own folder and written out as the config the
+runtime reads, so there is nothing to edit by hand.
+
+```sh
+ARCHS=arm64 RUNTIME=/folder/with/node SIGN="Developer ID Application: Name (TEAM)" helpers/macos/build-app.sh
+```
+
+`RUNTIME` is a folder holding `node` for that kind of Mac, from nodejs.org. The runtime
+is Node and the same files a person would otherwise run: `mcp.mjs`, this environment and
+the harness. An app built without `RUNTIME` is the helper alone, as before.
+
+## Editions
+
+The same program can be built under another name, for an app that offers it to its own
+people. An edition is one file, kept wherever its owner keeps it, saying the name, the
+app id, the mark, the wording and the app to go on to the first time a computer
+connects. `editions/praecise.json` is Praecise Control's own.
+
+```sh
+EDITION=/path/to/edition.json helpers/macos/build-app.sh      # macOS
+node mcp.mjs <folder> --cloud --first-run --edition /path/to/edition.json
+```
+
+On Windows an edition adds `/define:EDITION` and a file defining `Edition` to the two
+compiler lines; on Linux it is `edition.json` beside the helper.
+
 ## Recording
 
 `computer_control_record` records one app's window as video and gives back pictures

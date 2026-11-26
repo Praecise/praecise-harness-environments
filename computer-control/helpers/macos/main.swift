@@ -998,6 +998,7 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     item.menu = menu
     picture()
     Timer.scheduledTimer(timeInterval: 1, target: self, selector: #selector(sign), userInfo: nil, repeats: true)
+    Route.shared.resume()
   }
 
   /// The Praecise mark in one colour, which the menu bar tints for itself: a square, its left half open.
@@ -1048,6 +1049,9 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.removeAllItems()
     let (joined, all, read): ([Session], [(name: String, bytes: Int, at: Date)], Int) = work.sync { (sessions.values.sorted { $0.since < $1.since }, kept(), refs.count) }
 
+    // This computer on the public route, and what is allowed on it, where the app carries its runtime.
+    if Route.shared.available { route(menu) }
+
     // Who is connected.
     menu.addItem(.sectionHeader(title: "Agents"))
     if capturing { add("Capturing a window now", nil, to: menu, symbol: "record.circle") }
@@ -1076,6 +1080,77 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if let by = BY { add(by, nil, to: menu) }
     add("Quit \(NAME)", #selector(quit), to: menu, symbol: "power")
   }
+
+  /// A menu inside the menu, for a list of things to choose among.
+  func inner(_ title: String, symbol: String, in menu: NSMenu) -> NSMenu {
+    let entry = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    entry.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+    let within = NSMenu()
+    entry.submenu = within
+    menu.addItem(entry)
+    return within
+  }
+  func choice(_ title: String, _ action: Selector, _ carried: Any, on: Bool, in menu: NSMenu) {
+    let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    entry.target = self
+    entry.representedObject = carried
+    entry.state = on ? .on : .off
+    menu.addItem(entry)
+  }
+
+  func route(_ menu: NSMenu) {
+    let route = Route.shared
+    menu.addItem(.sectionHeader(title: "This Computer"))
+    add(route.status, nil, to: menu)
+    add(route.wanted ? "Disconnect This Computer" : "Connect This Computer…", #selector(connect), to: menu, symbol: route.wanted ? "xmark.circle" : "link")
+
+    // The apps an agent may be shown: those chosen, and those open now to choose from.
+    let apps = inner("Apps", symbol: "macwindow.on.rectangle", in: menu)
+    let picked = route.chosen("apps")
+    let open = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.compactMap { $0.localizedName }.filter { $0 != NAME }
+    for name in (picked + open.filter { !picked.contains($0) }.sorted()) { choice(name, #selector(app(_:)), name, on: picked.contains(name), in: apps) }
+
+    let folders = inner("Folders", symbol: "folder", in: menu)
+    for path in route.chosen("folders") { choice((path as NSString).abbreviatingWithTildeInPath, #selector(folder(_:)), path, on: true, in: folders) }
+    add("Add a Folder…", #selector(addFolder), to: folders)
+    let coding = inner("Folders for Coding Agents", symbol: "chevron.left.forwardslash.chevron.right", in: menu)
+    for path in route.chosen("coding") { choice((path as NSString).abbreviatingWithTildeInPath, #selector(codingFolder(_:)), path, on: true, in: coding) }
+    add("Add a Folder…", #selector(addCodingFolder), to: coding)
+
+    choice("Camera", #selector(flip(_:)), "camera", on: route.on("camera"), in: menu)
+    choice("Microphone", #selector(flip(_:)), "microphone", on: route.on("microphone"), in: menu)
+
+    // What each may have done to it: looked at, worked on, or worked on and sent from.
+    let listed = route.accounts
+    if !listed.isEmpty {
+      let modes = inner("What May Be Done", symbol: "hand.raised", in: menu)
+      for each in listed {
+        let one = inner(each.alias, symbol: "circle", in: modes)
+        for (mode, title) in [("read", "Look Only"), ("draft", "Work In It"), ("act", "Work In It and Ask Before Sending")] {
+          choice(title, #selector(mode(_:)), [each.alias, mode], on: each.mode == mode, in: one)
+        }
+      }
+    }
+  }
+
+  @objc func connect() { Route.shared.connect(!Route.shared.wanted) }
+  @objc func app(_ sender: NSMenuItem) { if let name = sender.representedObject as? String { Route.shared.toggle("apps", name) } }
+  @objc func folder(_ sender: NSMenuItem) { if let path = sender.representedObject as? String { Route.shared.toggle("folders", path) } }
+  @objc func codingFolder(_ sender: NSMenuItem) { if let path = sender.representedObject as? String { Route.shared.toggle("coding", path) } }
+  @objc func flip(_ sender: NSMenuItem) { if let key = sender.representedObject as? String { Route.shared.flip(key) } }
+  @objc func mode(_ sender: NSMenuItem) { if let pair = sender.representedObject as? [String], pair.count == 2 { Route.shared.mode(pair[0], pair[1]) } }
+  /// The system's own way of choosing a folder.
+  func pick() -> String? {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.allowsMultipleSelection = false
+    panel.prompt = "Allow"
+    NSApp.activate(ignoringOtherApps: true)
+    return panel.runModal() == .OK ? panel.url?.path : nil
+  }
+  @objc func addFolder() { if let path = pick(), !Route.shared.chosen("folders").contains(path) { Route.shared.toggle("folders", path) } }
+  @objc func addCodingFolder() { if let path = pick(), !Route.shared.chosen("coding").contains(path) { Route.shared.toggle("coding", path) } }
 
   @objc func pause() {
     work.sync { paused.toggle() }
@@ -1110,6 +1185,7 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if !CGRequestScreenCaptureAccess(), let pane = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(pane) }
   }
   @objc func quit() {
+    Route.shared.end()
     unlink(SOCKET)
     NSApp.terminate(nil)
   }
