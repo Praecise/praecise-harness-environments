@@ -198,17 +198,20 @@ if (flag("--cloud") >= 0 || managing) {
     return new Promise((done, failed) => {
       const verifier = randomBytes(32).toString("base64url");
       const state = randomBytes(16).toString("base64url");
+      // Where the browser comes back to, known once this is listening and kept for after it has closed.
+      let port;
       const back = createServer((request, response) => {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         if (url.pathname !== "/callback") return response.writeHead(404).end();
         response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(url.searchParams.get("code") ? `Signed in to ${edition.name}. You can close this page.` : `${edition.name} was not signed in to.`);
         back.close();
         if (url.searchParams.get("state") !== state || !url.searchParams.get("code")) return failed(new Error(url.searchParams.get("error_description") ?? "the sign-in was not finished"));
-        exchange({ grant_type: "authorization_code", code: url.searchParams.get("code"), code_verifier: verifier, redirect_uri: `http://127.0.0.1:${back.address().port}/callback` }).then(done, failed);
+        exchange({ grant_type: "authorization_code", code: url.searchParams.get("code"), code_verifier: verifier, redirect_uri: `http://127.0.0.1:${port}/callback` }).then(done, failed);
       });
       back.listen(0, "127.0.0.1", () => {
+        port = back.address().port;
         const page = new URL(account.authorization_endpoint);
-        for (const [key, value] of Object.entries({ response_type: "code", client_id: client, redirect_uri: `http://127.0.0.1:${back.address().port}/callback`, scope: asks, resource: address, state, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) page.searchParams.set(key, value);
+        for (const [key, value] of Object.entries({ response_type: "code", client_id: client, redirect_uri: `http://127.0.0.1:${port}/callback`, scope: asks, resource: address, state, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) page.searchParams.set(key, value);
         note(`sign in to ${managing ? "manage your computers" : "connect this computer"}: ${page.href}`);
         show(page.href);
       });

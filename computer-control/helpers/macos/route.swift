@@ -170,6 +170,7 @@ final class Route: @unchecked Sendable {
     heard.fileHandleForReading.readabilityHandler = { [weak self] handle in
       let text = String(decoding: handle.availableData, as: UTF8.self)
       guard let self, !text.isEmpty else { return }
+      self.log(text)
       // What it says, in the words a person reads in the menu.
       var now: String?
       if text.contains("sign in to") { now = "Waiting for you to sign in, in your browser" }
@@ -189,6 +190,19 @@ final class Route: @unchecked Sendable {
     } catch {
       lock.withLock { said = "The runtime could not be started" }
     }
+  }
+
+  /// What the runtime said, kept so that a fault can be read afterwards. The address a person signs in at is left out.
+  private func log(_ text: String) {
+    let file = SUPPORT.appendingPathComponent("runtime.log")
+    let lines = text.split(separator: "\n").filter { !$0.contains("sign in to") }.joined(separator: "\n")
+    guard !lines.isEmpty, let data = (lines + "\n").data(using: .utf8) else { return }
+    if let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int, size > 200_000 { try? FileManager.default.removeItem(at: file) }
+    if let handle = try? FileHandle(forWritingTo: file) {
+      handle.seekToEndOfFile()
+      handle.write(data)
+      try? handle.close()
+    } else { try? data.write(to: file) }
   }
 
   /// Connects this computer, or disconnects it.

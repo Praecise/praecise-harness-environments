@@ -1090,8 +1090,9 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.addItem(entry)
     return within
   }
-  func choice(_ title: String, _ action: Selector, _ carried: Any, on: Bool, in menu: NSMenu) {
+  func choice(_ title: String, _ action: Selector, _ carried: Any, on: Bool, in menu: NSMenu, symbol: String? = nil) {
     let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    if let symbol { entry.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
     entry.target = self
     entry.representedObject = carried
     entry.state = on ? .on : .off
@@ -1117,8 +1118,8 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     for path in route.chosen("coding") { choice((path as NSString).abbreviatingWithTildeInPath, #selector(codingFolder(_:)), path, on: true, in: coding) }
     add("Add a Folder…", #selector(addCodingFolder), to: coding)
 
-    choice("Camera", #selector(flip(_:)), "camera", on: route.on("camera"), in: menu)
-    choice("Microphone", #selector(flip(_:)), "microphone", on: route.on("microphone"), in: menu)
+    choice("Camera", #selector(flip(_:)), "camera", on: route.on("camera"), in: menu, symbol: "camera")
+    choice("Microphone", #selector(flip(_:)), "microphone", on: route.on("microphone"), in: menu, symbol: "mic")
 
     // What each may have done to it: looked at, worked on, or worked on and sent from.
     let listed = route.accounts
