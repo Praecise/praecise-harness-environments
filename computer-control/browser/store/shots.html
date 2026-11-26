@@ -8,6 +8,7 @@
     store/shots.html?shot=offer   1280 by 800: the popup before a tab is offered
     store/shots.html?shot=using   1280 by 800: the popup while an agent uses a tab
     store/shots.html?shot=tile    440 by 280: the small tile
+    store/shots.html?shot=marquee 1400 by 560: the wide tile
 -->
 <style>
   html, body { margin: 0; height: 100%; }
@@ -19,6 +20,7 @@
   .mark { width: 56px; height: 56px; }
   .window { width: 344px; background: #f4f4f2; border-radius: 14px; box-shadow: 0 24px 60px rgba(20, 40, 50, 0.22), 0 0 0 1px rgba(20, 40, 50, 0.08); overflow: hidden; }
   iframe { display: block; width: 344px; height: 250px; border: 0; }
+  .wide .shot { gap: 110px; }
   .tile { display: flex; gap: 22px; align-items: center; }
   .tile img { width: 96px; height: 96px; }
   .tile h1 { font-size: 30px; margin: 0 0 4px; font-weight: 650; letter-spacing: -0.01em; }
@@ -31,6 +33,8 @@
     document.body.innerHTML = `<div class="tile"><img src="../../assets/icon-256.png" alt=""><div><h1>Praecise Control</h1><p>Let an agent on this computer use one tab you offer it.</p></div></div>`;
   } else {
     const using = shot === "using";
+    // The wide tile is the first picture in a shorter frame.
+    if (shot === "marquee") document.body.classList.add("wide");
     document.body.innerHTML = `<div class="shot"><div class="say"><img class="mark" src="../../assets/icon-256.png" alt="">
       <h1>${using ? "It works that tab, on that site, until you stop it." : "You choose the one tab an agent may use."}</h1>
       <p>${using ? "Press Stop, close the tab or leave the site, and it is cut off." : "Nothing is offered until you press the button. The pages in your other tabs are never read."}</p></div>

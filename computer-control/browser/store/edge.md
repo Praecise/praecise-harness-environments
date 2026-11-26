@@ -67,6 +67,8 @@ Privacy: https://control.praecise.com/docs/privacy/
 
 **Small promotional tile:** `images/tile.png` (440 by 280)
 
+**Large promotional tile:** `images/marquee.png` (1400 by 560)
+
 **Screenshots:** `images/offer.png`, `images/using.png` (1280 by 800)
 
 **Short description:** from the manifest.

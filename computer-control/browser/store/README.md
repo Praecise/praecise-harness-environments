@@ -38,6 +38,7 @@ Every store asks the same things in different boxes. These are the answers.
 | `images/offer.png` | 1280 by 800 | First screenshot, every store |
 | `images/using.png` | 1280 by 800 | Second screenshot, every store |
 | `images/tile.png` | 440 by 280 | Small promotional tile (Chrome, Edge) |
+| `images/marquee.png` | 1400 by 560 | Marquee tile (Chrome), large tile (Edge) |
 | `../../assets/icon-128.png` | 128 by 128 | Store icon (Chrome) |
 | `../../assets/icon-512.png` | 512 by 512 | Logo (Edge takes 300 by 300 or larger) |
 

@@ -46,7 +46,9 @@ Privacy: https://control.praecise.com/docs/privacy/
 
 **Screenshots:** `images/offer.png`, `images/using.png`
 
-**Small promo tile:** `images/tile.png`
+**Small promo tile:** `images/tile.png` (440 by 280)
+
+**Marquee promo tile:** `images/marquee.png` (1400 by 560, optional)
 
 **Homepage URL:** https://control.praecise.com
 
