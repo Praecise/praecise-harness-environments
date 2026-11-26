@@ -798,7 +798,8 @@ static class Helper {
   public static void Serve() {
     var listening = new Thread(() => {
       while (true) {
-        var pipe = new NamedPipeServerStream(Pipe, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, PipeOptions.None);
+        // Read and written at once: see the other end.
+        var pipe = new NamedPipeServerStream(Pipe, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
         pipe.WaitForConnection();
         var joined = pipe;
         var each = new Thread(() => {
@@ -814,7 +815,8 @@ static class Helper {
 
   /// Pass this program's input to the app and the app's answers back.
   static int Relay() {
-    var pipe = new NamedPipeClientStream(".", Pipe, PipeDirection.InOut);
+    // Read and written at once, from two threads: a pipe opened the ordinary way makes one of those wait for the other.
+    var pipe = new NamedPipeClientStream(".", Pipe, PipeDirection.InOut, PipeOptions.Asynchronous);
     try {
       pipe.Connect(3000);
     } catch (Exception) {
@@ -836,6 +838,7 @@ static class Helper {
       pipe.WaitForPipeDrain();
     } catch (IOException) { }
     back.Join(5000);
+    Environment.Exit(0);
     return 0;
   }
 
