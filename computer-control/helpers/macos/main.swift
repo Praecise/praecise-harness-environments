@@ -121,7 +121,8 @@ func ref(for element: AXUIElement, app: String, role: String, name: String) -> S
 
 // MARK: Apps and windows
 
-struct Target { let id: String; let pid: pid_t; let app: AXUIElement; let window: AXUIElement; let frame: CGRect }
+// Handed to the thread that takes a picture, which reads its numbers and nothing else.
+struct Target: @unchecked Sendable { let id: String; let pid: pid_t; let app: AXUIElement; let window: AXUIElement; let frame: CGRect }
 
 func running(_ id: String) -> NSRunningApplication? {
   NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == id && !$0.isTerminated }
@@ -291,15 +292,21 @@ func fill(_ params: [String: Any]) throws -> Any {
 
 // MARK: Pictures
 
-func wait<T>(_ work: @escaping () async throws -> T) throws -> T {
+/// Somewhere to put an answer that is made on another thread and read once that thread has said it is done.
+final class Slot<Value>: @unchecked Sendable {
+  var value: Value
+  init(_ value: Value) { self.value = value }
+}
+
+func wait<T>(_ work: @escaping @Sendable () async throws -> T) throws -> T {
   let done = DispatchSemaphore(value: 0)
-  var result: Result<T, Error> = .failure(Failure(message: "no answer"))
+  let slot = Slot<Result<T, Error>>(.failure(Failure(message: "no answer")))
   Task.detached {
-    do { result = .success(try await work()) } catch { result = .failure(error) }
+    do { slot.value = .success(try await work()) } catch { slot.value = .failure(error) }
     done.signal()
   }
   done.wait()
-  return try result.get()
+  return try slot.value.get()
 }
 
 func screenshot(_ params: [String: Any]) throws -> Any {
@@ -521,13 +528,13 @@ func open(_ params: [String: Any]) throws -> Any {
   // Started behind what the person is doing, not in front of it.
   setup.activates = false
   let done = DispatchSemaphore(value: 0)
-  var failed: String?
+  let failed = Slot<String?>(nil)
   NSWorkspace.shared.openApplication(at: url, configuration: setup) { _, error in
-    failed = error?.localizedDescription
+    failed.value = error?.localizedDescription
     done.signal()
   }
   guard done.wait(timeout: .now() + 20) == .success else { return try fail("the app did not start in time") }
-  if let failed { return try fail("the app could not be started: \(failed)") }
+  if let failed = failed.value { return try fail("the app could not be started: \(failed)") }
   return NSNull()
 }
 

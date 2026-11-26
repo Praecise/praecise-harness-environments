@@ -12,15 +12,16 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-"$here"}
 app="$out/Praecise Control.app"
+made=$(mktemp -d)
+trap 'rm -rf "$made"' EXIT
+# Compiled first: a build that fails leaves the app that was there as it was.
+for arch in arm64 x86_64; do
+  nice -n 20 xcrun swiftc -swift-version 6 -O -j 1 -target "$arch-apple-macos14.0" "$here/main.swift" -o "$made/$arch"
+done
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$here/../../assets/praecise-control.icns" "$app/Contents/Resources/praecise-control.icns"
 cp "$here/Info.plist" "$app/Contents/Info.plist"
-made=$(mktemp -d)
-trap 'rm -rf "$made"' EXIT
-for arch in arm64 x86_64; do
-  nice -n 20 xcrun swiftc -swift-version 6 -O -j 1 -target "$arch-apple-macos14.0" "$here/main.swift" -o "$made/$arch"
-done
 lipo -create "$made/arm64" "$made/x86_64" -output "$app/Contents/MacOS/praecise-control"
 if [ -n "${SIGN:-}" ]; then
   codesign --force --options runtime --timestamp --sign "$SIGN" "$app"
