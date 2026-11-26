@@ -148,6 +148,8 @@ let asked = 0;
 
 const DATA = process.env.CONTROL_DATA ?? (process.env.HOME ? join(process.env.HOME, "praecise-control-relay") : "");
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
+/** Where a person gets Praecise Control for a computer. */
+const GET = process.env.CONTROL_DOWNLOADS ?? "https://control.praecise.com/#download";
 
 /** How many of the latest things done on one computer are kept for its person to read. */
 const RECORD = 200;
@@ -223,7 +225,7 @@ function needs(message) {
 }
 
 /** The computers a token names. */
-const named = (said) => [...new Set([...String(said.control_devices ?? "").split(" "), said.control_machine].filter((each) => typeof each === "string" && ID.test(each)))];
+const named = (said) => [...new Set([...String(said.control_devices ?? "").split(/[ .,]+/), said.control_machine].filter((each) => typeof each === "string" && ID.test(each)))];
 
 /** What an app may do on one computer now: what its token allows, less what the person narrowed or withdrew there. */
 function allowed(said, device) {
@@ -390,7 +392,7 @@ function hook(body, signature) {
   const computers = people.get(person) ?? new Map();
   const known = (id) => Boolean(record.devices[id] && !record.devices[id].removed);
   const asked = put.requested ?? {};
-  const said = typeof asked.control_devices === "string" ? asked.control_devices.split(/[ ,]+/) : typeof asked.control_machine === "string" ? [asked.control_machine] : [];
+  const said = typeof asked.control_devices === "string" ? asked.control_devices.split(/[ .,]+/) : typeof asked.control_machine === "string" ? [asked.control_machine] : [];
   const ids = [...new Set(said.filter((each) => ID.test(each)))].slice(0, 16);
   if (!ids.length) {
     // Nothing was named: the person picks one of theirs, those connected now first.
@@ -401,8 +403,8 @@ function hook(body, signature) {
   // A computer the person removed, or withdrew this app from, drops out; a renewal is asked this too.
   const still = ids.filter((id) => known(id) && !record.limits[id]?.[put.client_id]?.off);
   if (!still.length) return { error: "access_denied", error_description: "None of those computers is yours to allow, or this app's use of them was withdrawn." };
-  const claims = { control_devices: still.join(" ") };
-  const requested = { control_devices: still.join(" ") };
+  const claims = { control_devices: still.join(".") };
+  const requested = { control_devices: still.join(".") };
   if (still.length === 1) claims.control_machine = still[0];
   if (asked.control_until !== undefined) {
     const until = /^\d{9,11}$/.test(String(asked.control_until)) ? Number(asked.control_until) : Math.floor(Date.parse(String(asked.control_until)) / 1000);
@@ -449,7 +451,8 @@ function listed(said) {
     }
     out.push(one);
   }
-  return { devices: out, inputs: Object.values(INPUTS) };
+  // With none yet, an app has somewhere to send its person: where Praecise Control is got for a computer.
+  return { devices: out, inputs: Object.values(INPUTS), get: GET };
 }
 
 /** A person changing their list: a name, removing or restoring a computer, narrowing or withdrawing an app on one. */

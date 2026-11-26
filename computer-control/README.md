@@ -377,6 +377,51 @@ Removing and paying cannot be waived, and once a window has been read in a conve
 everything that commits waits for a person whatever is waived. `waive` needs a harness
 later than 1.2.1.
 
+
+### Apps, computers and permissions
+
+An app that signs people in with Praecise uses the same route. It registers as an app
+at the account service, asks its person for Praecise Control on the consent page, and
+is given a token for the computers and the permissions the person allowed there.
+Nothing is paired by hand: a computer belongs to the account it connected with, so a
+token for the same person finds it.
+
+| Permission | What it allows on a computer |
+|---|---|
+| `control:screen` | Reading the windows of the allowed apps as elements, and pictures of them |
+| `control:act` | Pressing, filling, typing, the pointer and the keys, and opening an allowed app |
+| `control:record` | Recording a window |
+| `control:use` | All three at once |
+| `control:devices` | The names of the person's computers, and whether each is connected |
+| `control:manage` | Naming or removing a computer, and narrowing or withdrawing an app on one |
+
+The app names the computers in `control_devices` (ids separated by full stops) and may
+set `control_until`, a time after which the permission is over. With no computer named,
+the consent page offers the person's computers and they pick one. The relay is asked
+again each time a token is renewed, and tokens last ten minutes.
+
+Each press is still held by the app's mode on the computer itself. A permission here
+only decides what may be asked at all: what a token does not allow is refused at the
+relay and never reaches the computer.
+
+| Call | With | What it does |
+|---|---|---|
+| `GET /devices` | any permission above | The person's computers: `id`, `name`, `system`, `connected`, when each was last connected; for a computer this app was allowed, `allowed`, `until` and `in_use`. With none yet, `get` is where Praecise Control is downloaded |
+| `POST /mcp/<id>` | `control:screen`, `control:act`, `control:record` or `control:use` | MCP, to that computer. `/mcp` alone when the token names one computer |
+| `PATCH /devices/<id>` | `control:manage` | `{"name": "..."}`, or `{"removed": false}` to restore one |
+| `DELETE /devices/<id>` | `control:manage` | Removes a computer: it is disconnected and refused to every app until restored |
+| `PUT /devices/<id>/apps/<app>` | `control:manage` | `{"only": ["screen"], "until": 1790000000}` narrows an app there; `{"withdrawn": true}` withdraws it |
+| `DELETE /devices/<id>/apps/<app>` | `control:manage` | Withdraws an app from that computer. It holds at once, and stays until allowed again |
+| `GET /devices/<id>/activity` | `control:manage` | The latest 200 things asked of that computer: when, by which app, which tool and action, on which of the computer's apps |
+
+Two headers are for an app that passes its permission on to helpers of its own.
+`Praecise-Control-Only: screen` holds one request to less than the app was allowed, and
+`Praecise-Control-Actor: <name>` says which helper is asking; the name is written in
+the computer's record beside the app's.
+
+The relay keeps the list of computers, what a person narrowed or withdrew, and that
+record. It does not keep what was read, typed or pictured.
+
 ## What is not done
 
 - **The Mac app is signed and not notarized.** Notarizing needs a credential stored on

@@ -20,7 +20,7 @@ Each environment is two things from one folder:
 |---|---|
 | [Apple development](apple-development/) | Building, testing, signing and releasing apps for iOS, iPadOS, macOS, tvOS, watchOS and visionOS, with Xcode |
 | [Meta Platforms marketing](meta-marketing/) | Advertising on Facebook and Instagram, Page and Instagram publishing, comments and conversations, Threads, and WhatsApp Business messaging, through Meta's own MCP servers and its APIs |
-| [Computer control](computer-control/) | Working the apps on a Mac, a Windows or a Linux machine: reading each window as the things in it, pressing and filling them by reference, with every press held to what is pressed. With a helper for each of the three systems. Not released: it needs a harness later than 1.2.1, and the helpers are built from source and not signed |
+| [Computer control](computer-control/) | Working the apps on a Mac, a Windows or a Linux machine: reading each window as the things in it, pressing and filling them by reference, with every press held to what is pressed. With an app for each of the three systems, and a public route for assistants and apps a person allows with their Praecise account. Downloads at [control.praecise.com](https://control.praecise.com) |
 
 This package is at 0.3.0. Both environments are in it, and neither has a version of
 its own.

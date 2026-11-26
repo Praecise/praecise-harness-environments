@@ -170,7 +170,7 @@ test("an assistant elsewhere reaches a person's computer through the relay, and 
   // A time that has passed ends it.
   assert.equal((await mcp(token({ sub: "alice", scope: "control:use", control_devices: machine, control_until: String(Math.floor(Date.now() / 1000) - 5) }), { jsonrpc: "2.0", id: 25, method: "ping" })).status, 403);
   assert.equal((await hook({ account: alice, client_id: app, scopes: ["control:screen"], resource: address, requested: { control_devices: machine, control_until: "1000000000" } })).said.error, "access_denied");
-  const timed = (await hook({ account: alice, client_id: app, scopes: ["control:screen", "control:act"], resource: address, requested: { control_devices: `${machine} ${"q".repeat(12)}`, control_until: String(Math.floor(Date.now() / 1000) + 3600) } })).said;
+  const timed = (await hook({ account: alice, client_id: app, scopes: ["control:screen", "control:act"], resource: address, requested: { control_devices: `${machine}.${"q".repeat(12)}`, control_until: String(Math.floor(Date.now() / 1000) + 3600) } })).said;
   assert.deepEqual([timed.claims.control_devices, timed.scopes, typeof timed.claims.control_until], [machine, ["control:screen", "control:act"], "string"]);
   assert.deepEqual((await hook({ account: alice, client_id: app, scopes: ["control:devices"], resource: address, requested: {} })).said.scopes, ["control:devices"]);
 
