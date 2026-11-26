@@ -129,6 +129,143 @@ sealed class Std : Stream {
   public override void SetLength(long value) { throw new NotSupportedException(); }
 }
 
+/// A recording of one window: a picture of it every so often, each written as it is taken.
+///
+/// The file is the plainest kind of video there is, pictures one after another with a list of where each
+/// starts, so that it needs nothing but what is part of Windows to write and anything can play it.
+sealed class Recorder {
+  public readonly string App;
+  public readonly string FilePath;
+  public readonly int Width, Height;
+  public int Frames;
+  readonly IntPtr window;
+  readonly int rate, limit;
+  readonly FileStream file;
+  readonly List<KeyValuePair<long, int>> places = new List<KeyValuePair<long, int>>();
+  readonly Thread taking;
+  readonly DateTime started = DateTime.Now;
+  volatile bool ending;
+  long movi;
+
+  public Recorder(string app, IntPtr window, string path, int width, int height, int rate, int limit) {
+    App = app; this.window = window; FilePath = path; Width = width; Height = height; this.rate = rate; this.limit = limit;
+    file = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.Read);
+    Head();
+    taking = new Thread(Take) { IsBackground = true };
+    taking.Start();
+  }
+
+  void Four(string code) { file.Write(Encoding.ASCII.GetBytes(code), 0, 4); }
+  void Int(int value) { file.Write(BitConverter.GetBytes(value), 0, 4); }
+  void Short(short value) { file.Write(BitConverter.GetBytes(value), 0, 2); }
+
+  /// The head of the file, with the counts that are not known yet left to be filled in at the end.
+  void Head() {
+    Four("RIFF"); Int(0); Four("AVI ");
+    Four("LIST"); Int(4 + 8 + 56 + 8 + 4 + 8 + 56 + 8 + 40); Four("hdrl");
+    Four("avih"); Int(56);
+    Int(1000000 / rate); Int(0); Int(0); Int(0x10); Int(0); Int(0); Int(1); Int(0); Int(Width); Int(Height); Int(0); Int(0); Int(0); Int(0);
+    Four("LIST"); Int(4 + 8 + 56 + 8 + 40); Four("strl");
+    Four("strh"); Int(56);
+    Four("vids"); Four("MJPG"); Int(0); Short(0); Short(0); Int(0); Int(1); Int(rate); Int(0); Int(0); Int(0); Int(-1); Int(0); Short(0); Short(0); Short((short)Width); Short((short)Height);
+    Four("strf"); Int(40);
+    Int(40); Int(Width); Int(Height); Short(1); Short(24); Four("MJPG"); Int(Width * Height * 3); Int(0); Int(0); Int(0); Int(0);
+    Four("LIST"); Int(0); movi = file.Position; Four("movi");
+  }
+
+  void Take() {
+    var encoder = Array.Find(ImageCodecInfo.GetImageEncoders(), each => each.FormatID == ImageFormat.Jpeg.Guid);
+    var how = new EncoderParameters(1);
+    how.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 80L);
+    var every = 1000 / rate;
+    while (!ending && (DateTime.Now - started).TotalSeconds < limit) {
+      var due = started.AddMilliseconds((Frames + 1) * every);
+      try {
+        Native.RECT rect;
+        if (Native.GetWindowRect(window, out rect) && rect.Right - rect.Left > 0 && rect.Bottom - rect.Top > 0) {
+          using (var whole = new Bitmap(rect.Right - rect.Left, rect.Bottom - rect.Top, PixelFormat.Format32bppArgb))
+          using (var shown = new Bitmap(Width, Height, PixelFormat.Format24bppRgb))
+          using (var written = new MemoryStream()) {
+            bool drawn;
+            using (var graphics = Graphics.FromImage(whole)) {
+              var dc = graphics.GetHdc();
+              drawn = Native.PrintWindow(window, dc, 2);
+              graphics.ReleaseHdc(dc);
+            }
+            if (drawn) {
+              using (var graphics = Graphics.FromImage(shown)) graphics.DrawImage(whole, 0, 0, Width, Height);
+              shown.Save(written, encoder, how);
+              lock (file) {
+                if (ending) break;
+                var jpeg = written.ToArray();
+                places.Add(new KeyValuePair<long, int>(file.Position - movi, jpeg.Length));
+                Four("00dc"); Int(jpeg.Length); file.Write(jpeg, 0, jpeg.Length);
+                if (jpeg.Length % 2 == 1) file.WriteByte(0);
+                Frames++;
+              }
+            }
+          }
+        }
+      } catch (Exception) { }
+      var wait = (int)(due - DateTime.Now).TotalMilliseconds;
+      if (wait > 0) Thread.Sleep(wait);
+    }
+    Finish();
+  }
+
+  bool finished;
+
+  /// The list of where each picture starts, and the counts the head was waiting for.
+  void Finish() {
+    lock (file) {
+      if (finished) return;
+      finished = true;
+      ending = true;
+      var end = file.Position;
+      Four("idx1"); Int(places.Count * 16);
+      foreach (var each in places) { Four("00dc"); Int(0x10); Int((int)each.Key); Int(each.Value); }
+      var length = file.Position;
+      file.Position = 4; Int((int)(length - 8));
+      file.Position = 48; Int(Frames);
+      file.Position = 140; Int(Frames);
+      file.Position = movi - 4; Int((int)(end - movi));
+      file.Flush();
+      file.Dispose();
+    }
+  }
+
+  public double Stop() {
+    ending = true;
+    taking.Join(5000);
+    Finish();
+    return Math.Min((DateTime.Now - started).TotalSeconds, limit);
+  }
+
+  /// Where each picture is in a finished recording, and how many there are to a second.
+  public static List<KeyValuePair<long, int>> Index(string path, out int rate) {
+    var found = new List<KeyValuePair<long, int>>();
+    rate = 1;
+    using (var file = File.OpenRead(path))
+    using (var reader = new BinaryReader(file)) {
+      if (file.Length < 240 || new string(reader.ReadChars(4)) != "RIFF") return found;
+      file.Position = 132;
+      rate = Math.Max(1, reader.ReadInt32());
+      file.Position = 212;
+      var size = reader.ReadInt32();
+      var movi = file.Position;
+      if (new string(reader.ReadChars(4)) != "movi") return found;
+      var end = movi + size;
+      while (file.Position + 8 <= end) {
+        var code = new string(reader.ReadChars(4));
+        var length = reader.ReadInt32();
+        if (code == "00dc") found.Add(new KeyValuePair<long, int>(file.Position, length));
+        file.Position += length + length % 2;
+      }
+    }
+    return found;
+  }
+}
+
 static class Helper {
   static readonly Dictionary<string, Known> Refs = new Dictionary<string, Known>();
   static readonly Dictionary<string, string> Named = new Dictionary<string, string>();
@@ -686,11 +823,152 @@ static class Helper {
     return new Dictionary<string, object> { {"x", at.X}, {"y", at.Y} };
   }
 
+  // Recording: pictures of the window, taken the way one picture is, written one after another as a video
+
+  public static readonly string Recordings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Praecise Control", "recordings");
+  /// What recordings may take up together, and how long one is kept. Older ones go first.
+  public static readonly long KeptBytes = ReadLimit();
+  const double KeptSeconds = 24 * 3600;
+  const int Longest = 600;
+  static readonly Dictionary<string, Recorder> Recording = new Dictionary<string, Recorder>();
+
+  static long ReadLimit() {
+    long said;
+    return long.TryParse(Environment.GetEnvironmentVariable("PRAECISE_CONTROL_RECORDINGS_BYTES"), out said) && said > 0 ? said : 2L * 1024 * 1024 * 1024;
+  }
+
+  public static List<FileInfo> Kept() {
+    var found = new List<FileInfo>();
+    if (Directory.Exists(Recordings)) foreach (var path in Directory.GetFiles(Recordings)) found.Add(new FileInfo(path));
+    found.Sort((a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
+    return found;
+  }
+
+  static bool Busy(string path) {
+    foreach (var each in Recording.Values) if (string.Equals(each.FilePath, path, StringComparison.OrdinalIgnoreCase)) return true;
+    return false;
+  }
+
+  /// Keep what is recorded within its bounds: nothing older than a day, and no more than the limit in all.
+  static long Prune() {
+    var all = Kept();
+    long total = 0;
+    for (var at = all.Count - 1; at >= 0; at--) {
+      if (!Busy(all[at].FullName) && (DateTime.UtcNow - all[at].LastWriteTimeUtc).TotalSeconds > KeptSeconds) { all[at].Delete(); all.RemoveAt(at); }
+    }
+    foreach (var each in all) total += each.Length;
+    for (var at = all.Count - 1; at >= 0 && total > KeptBytes; at--) {
+      if (Busy(all[at].FullName)) continue;
+      total -= all[at].Length;
+      all[at].Delete();
+    }
+    return total;
+  }
+
+  static object RecordStart(Dictionary<string, object> asked) {
+    var target = Find(asked);
+    foreach (var each in Recording.Values) if (each.App == target.Id) throw new Failure(target.Id + " is already being recorded; stop that first");
+    Directory.CreateDirectory(Recordings);
+    if (Prune() >= KeptBytes) throw new Failure("the recordings kept here have reached their limit and none can be removed; stop one that is running");
+    var limit = Math.Max(1, Math.Min(Longest, (int)(Number(asked, "seconds") ?? 60)));
+    var rate = Math.Max(1, Math.Min(15, (int)(Number(asked, "fps") ?? 5)));
+    object sound;
+    if (asked.TryGetValue("audio", out sound) && sound is bool && (bool)sound) throw new Failure("this helper records what a window shows and not what the computer plays");
+    var name = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + target.Id;
+    var recorder = new Recorder(target.Id, target.Window, Path.Combine(Recordings, name + ".avi"), target.Width / 2 * 2, target.Height / 2 * 2, rate, limit);
+    Recording[name] = recorder;
+    return new Dictionary<string, object> { {"recording", name}, {"seconds", limit}, {"width", recorder.Width}, {"height", recorder.Height} };
+  }
+
+  static object RecordStop(Dictionary<string, object> asked) {
+    var name = Text(asked, "recording") ?? "";
+    Recorder recorder;
+    if (!Recording.TryGetValue(name, out recorder)) {
+      // One that ended by itself at its length is still there to be asked about.
+      var path = Path.Combine(Recordings, Path.GetFileName(name) + ".avi");
+      if (name != "" && File.Exists(path)) return new Dictionary<string, object> { {"recording", name}, {"path", path}, {"mime", "video/x-msvideo"}, {"bytes", new FileInfo(path).Length} };
+      throw new Failure((name == "" ? "that" : name) + " is not a recording that is running");
+    }
+    Recording.Remove(name);
+    var seconds = recorder.Stop();
+    if (recorder.Frames == 0) throw new Failure("nothing was recorded: the window could not be pictured while it ran");
+    return new Dictionary<string, object> { {"recording", name}, {"path", recorder.FilePath}, {"mime", "video/x-msvideo"}, {"bytes", new FileInfo(recorder.FilePath).Length}, {"seconds", Math.Round(seconds, 1)} };
+  }
+
+  /// Pictures from a recording, spread evenly through it.
+  static object FramesOf(Dictionary<string, object> asked) {
+    var name = Path.GetFileNameWithoutExtension(Text(asked, "recording") ?? "");
+    var path = Path.Combine(Recordings, name + ".avi");
+    if (name == "" || !File.Exists(path)) throw new Failure("there is no recording called " + (name == "" ? "that" : name) + " here");
+    if (Busy(path)) throw new Failure(name + " is still being recorded; stop it first");
+    var count = Math.Max(1, Math.Min(12, (int)(Number(asked, "count") ?? 4)));
+    int rate;
+    var places = Recorder.Index(path, out rate);
+    if (places.Count == 0) throw new Failure(name + " cannot be read as a recording");
+    var frames = new List<object>();
+    using (var file = File.OpenRead(path)) {
+      for (var nth = 0; nth < count; nth++) {
+        var which = Math.Min(places.Count - 1, (int)(places.Count * (nth + 0.5) / count));
+        var jpeg = new byte[places[which].Value];
+        file.Position = places[which].Key;
+        file.Read(jpeg, 0, jpeg.Length);
+        using (var picture = new Bitmap(new MemoryStream(jpeg)))
+        using (var written = new MemoryStream()) {
+          picture.Save(written, ImageFormat.Png);
+          var at = Math.Round((double)which / rate, 1);
+          frames.Add(new Dictionary<string, object> { {"mime", "image/png"}, {"data", Convert.ToBase64String(written.ToArray())}, {"name", "frame-" + at.ToString(System.Globalization.CultureInfo.InvariantCulture) + "s.png"}, {"at", at} });
+        }
+      }
+    }
+    return new Dictionary<string, object> { {"recording", name}, {"seconds", Math.Round((double)places.Count / rate, 1)}, {"frames", frames} };
+  }
+
+  // What is kept, and who is connected
+
+  public class Session { public DateTime Since = DateTime.Now; public string App = ""; public DateTime Last = DateTime.MinValue; public Stream Line; }
+  public static readonly List<Session> Sessions = new List<Session>();
+  [ThreadStatic] static Session asking;
+
+  static object Storage() {
+    var recordings = new List<object>();
+    long total = 0;
+    foreach (var each in Kept()) {
+      total += each.Length;
+      recordings.Add(new Dictionary<string, object> { {"name", each.Name}, {"bytes", each.Length}, {"at", (long)(each.LastWriteTimeUtc - new DateTime(1970, 1, 1)).TotalSeconds} });
+    }
+    return new Dictionary<string, object> { {"folder", Recordings}, {"bytes", total}, {"limit", KeptBytes}, {"elements", Refs.Count}, {"recordings", recordings} };
+  }
+
+  static object Connected() {
+    var list = new List<object>();
+    lock (Sessions) foreach (var each in Sessions) {
+      list.Add(new Dictionary<string, object> { {"since", (long)(each.Since.ToUniversalTime() - new DateTime(1970, 1, 1)).TotalSeconds}, {"app", each.App}, {"last", each.Last == DateTime.MinValue ? 0 : (long)(each.Last.ToUniversalTime() - new DateTime(1970, 1, 1)).TotalSeconds} });
+    }
+    return list;
+  }
+
+  /// Remove what is kept. A recording that is still running is left alone.
+  public static object Clear(Dictionary<string, object> asked) {
+    var what = Text(asked, "what");
+    var removed = 0;
+    if (what == "recordings") {
+      foreach (var each in Kept()) if (!Busy(each.FullName)) { each.Delete(); removed++; }
+    } else if (what == "cache") {
+      removed = Refs.Count;
+      Refs.Clear(); Named.Clear(); Pointer.Clear(); Pointed.Clear();
+    } else throw new Failure("`what` is recordings or cache");
+    return new Dictionary<string, object> { {"removed", removed} };
+  }
+
+  /// For the menu, which is on another thread from the one that answers.
+  public static T Quietly<T>(Func<T> work) { lock (Turn) return work(); }
+  public static int Remembered { get { return Refs.Count; } }
+
   static object Hello() {
     var signedIn = Process.GetCurrentProcess().SessionId != 0;
     return new Dictionary<string, object> {
       {"system", "windows"}, {"user", Environment.UserName}, {"host", Environment.MachineName},
-      {"can", new List<object> { "activate", "fill" }},
+      {"can", new List<object> { "activate", "fill", "record" }},
       {"needs", new List<object> { new Dictionary<string, object> {
         {"name", "Signed-in session"}, {"ok", signedIn}, {"fix", "Start the helper in the session of whoever is signed in. One started by a service or over SSH can see no window."},
       } }},
@@ -715,6 +993,12 @@ static class Helper {
       case "type": return Type(asked);
       case "key": return Key(asked);
       case "cursor": return Cursor(asked);
+      case "record_start": return RecordStart(asked);
+      case "record_stop": return RecordStop(asked);
+      case "frames": return FramesOf(asked);
+      case "storage": return Storage();
+      case "sessions": return Connected();
+      case "clear": return Clear(asked);
       default: throw new Failure("this helper cannot " + method);
     }
   }
@@ -746,7 +1030,10 @@ static class Helper {
         var given = Part(asked, "params") ?? new Dictionary<string, object>();
         if (Paused && method != "hello") throw new Failure("Praecise Control is paused by the person at this machine");
         var app = Text(given, "app");
-        if (!string.IsNullOrEmpty(app)) { LastApp = app; LastAsked = DateTime.Now; }
+        if (!string.IsNullOrEmpty(app)) {
+          LastApp = app; LastAsked = DateTime.Now;
+          if (asking != null) { asking.App = app; asking.Last = LastAsked; }
+        }
         answer["result"] = Within(method, given);
       } catch (Failure failure) {
         answer["error"] = failure.Message;
@@ -803,7 +1090,13 @@ static class Helper {
         pipe.WaitForConnection();
         var joined = pipe;
         var each = new Thread(() => {
-          try { Lines(joined, joined); } catch (IOException) { } finally { joined.Dispose(); }
+          var session = new Session { Line = joined };
+          lock (Sessions) Sessions.Add(session);
+          asking = session;
+          try { Lines(joined, joined); } catch (IOException) { } catch (ObjectDisposedException) { } finally {
+            lock (Sessions) Sessions.Remove(session);
+            joined.Dispose();
+          }
         });
         each.IsBackground = true;
         each.Start();
@@ -872,11 +1165,35 @@ static class Tray {
       // Built as it is opened, so it says what is true now.
       menu.Opening += delegate {
         menu.Items.Clear();
-        var recent = (DateTime.Now - Helper.LastAsked).TotalSeconds < 60;
-        var state = menu.Items.Add(Helper.Paused ? "Paused: agents are refused" : recent ? "An agent is using " + Helper.LastApp : "No agent is using this computer");
-        state.Enabled = false;
+        Action<string> say = text => { menu.Items.Add(text).Enabled = false; };
+        List<Helper.Session> joined;
+        lock (Helper.Sessions) joined = new List<Helper.Session>(Helper.Sessions);
+        var kept = Helper.Kept();
+        long bytes = 0;
+        foreach (var each in kept) bytes += each.Length;
+
+        // Who is connected.
+        say(Helper.Paused ? "Paused: agents are refused" : joined.Count == 0 ? "No agent is connected" : joined.Count == 1 ? "1 agent is connected" : joined.Count + " agents are connected");
+        foreach (var each in joined) say("    " + (each.App == "" ? "has not used an app yet" : "using " + each.App + ", " + Ago(each.Last)) + ", connected " + Ago(each.Since));
         menu.Items.Add(Helper.Paused ? "Resume" : "Pause", null, delegate { Helper.Paused = !Helper.Paused; icon.Text = Helper.Paused ? "Praecise Control, paused" : "Praecise Control"; });
+        // Closed from this end. A harness that is still wanted connects again by itself.
+        if (joined.Count > 0) menu.Items.Add("Disconnect All", null, delegate { foreach (var each in joined) { try { each.Line.Dispose(); } catch (Exception) { } } });
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        // What is kept.
+        say(kept.Count == 0 ? "No recordings are kept" : kept.Count + " recording" + (kept.Count == 1 ? "" : "s") + " kept, " + Size(bytes) + " of " + Size(Helper.KeptBytes) + " allowed");
+        if (kept.Count > 0) {
+          menu.Items.Add("Show Recordings", null, delegate { System.Diagnostics.Process.Start("explorer.exe", "\"" + Helper.Recordings + "\""); });
+          menu.Items.Add("Delete All Recordings...", null, delegate {
+            var sure = System.Windows.Forms.MessageBox.Show("They are removed from this computer and cannot be brought back. A recording that is still running is kept.", "Delete all recordings?", System.Windows.Forms.MessageBoxButtons.OKCancel, System.Windows.Forms.MessageBoxIcon.Warning, System.Windows.Forms.MessageBoxDefaultButton.Button2);
+            if (sure == System.Windows.Forms.DialogResult.OK) Helper.Quietly(() => Helper.Clear(new Dictionary<string, object> { {"what", "recordings"} }));
+          });
+        }
+        var read = Helper.Remembered;
+        say(read == 0 ? "Nothing is remembered of any window" : read + " thing" + (read == 1 ? "" : "s") + " remembered from windows");
+        if (read > 0) menu.Items.Add("Clear Cache", null, delegate { Helper.Quietly(() => Helper.Clear(new Dictionary<string, object> { {"what", "cache"} })); });
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
         var starts = new System.Windows.Forms.ToolStripMenuItem("Start when I sign in") { Checked = Starts() };
         starts.Click += delegate { Start(!Starts()); };
         menu.Items.Add(starts);
@@ -888,6 +1205,14 @@ static class Tray {
       icon.Dispose();
       return 0;
     }
+  }
+
+  static string Size(long bytes) {
+    return bytes < 1024 ? bytes + " bytes" : bytes < 1024 * 1024 ? (bytes / 1024.0).ToString("0.0") + " KB" : bytes < 1024L * 1024 * 1024 ? (bytes / 1048576.0).ToString("0.0") + " MB" : (bytes / 1073741824.0).ToString("0.0") + " GB";
+  }
+  static string Ago(DateTime when) {
+    var passed = (int)(DateTime.Now - when).TotalSeconds;
+    return passed < 60 ? "just now" : passed < 3600 ? (passed / 60) + " min ago" : (passed / 3600) + " h ago";
   }
 
   /// For this person only, and theirs to turn on.
