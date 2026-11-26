@@ -23,6 +23,7 @@
 //   CONTROL_ISSUER               the account service; https://accounts.praecise.com unless said
 //   CONTROL_CLAIMS_HOOK_SECRET   shared with the account service, for the question it asks here
 //   CONTROL_DOWNLOADS_BY_APP     where an app's own edition is got, as JSON: {"<client id>": "<address>"}
+//   CONTROL_EDITION_CLIENTS      what an edition's program is called when it signs a person in, as JSON: {"<edition>": "<name>"}
 //   CONTROL_DATA                 the folder the list of computers is kept in; a folder in HOME unless said
 //   PORT                         8080 unless said
 //
@@ -151,6 +152,14 @@ const DATA = process.env.CONTROL_DATA ?? (process.env.HOME ? join(process.env.HO
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 /** Where a person gets Praecise Control for a computer. */
 const GET = process.env.CONTROL_DOWNLOADS ?? "https://control.praecise.com/#download";
+/** What each edition's program is called on the page where a person signs it in. */
+const EDITION_CLIENTS = (() => {
+  try {
+    return JSON.parse(process.env.CONTROL_EDITION_CLIENTS ?? "{}");
+  } catch {
+    return {};
+  }
+})();
 /** The same, for an app that has an edition of its own to send its people to: {"<client id>": "<address>"}. */
 const GET_FOR = (() => {
   try {
@@ -537,6 +546,12 @@ const server = createServer((request, response) => {
   if (!READY) return say(503, { error: "this relay has not been given its address and its secret yet" });
   if (request.method === "GET" && (path === "/.well-known/oauth-protected-resource" || path.startsWith("/.well-known/oauth-protected-resource/"))) {
     return say(200, { resource: ADDRESS, authorization_servers: [ISSUER], scopes_supported: [...USES, ...LISTS], bearer_methods_supported: ["header"], dpop_signing_alg_values_supported: ["ES256", "EdDSA"], resource_name: "Praecise Control" });
+  }
+  // The same, for an edition that carries another name: the person is asked by that name.
+  const [, named] = /^\/oauth\/clients\/([a-z0-9-]{1,24})\.json$/.exec(path) ?? [];
+  if (request.method === "GET" && named) {
+    if (typeof EDITION_CLIENTS[named] !== "string") return say(404, { error: "there is no such edition" });
+    return say(200, { client_id: `${ADDRESS}${path}`, client_name: EDITION_CLIENTS[named].slice(0, 80), redirect_uris: ["http://127.0.0.1/callback"], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" });
   }
   // How the program on a person's computer says what it is to the account service.
   if (request.method === "GET" && path === "/oauth/client.json") {

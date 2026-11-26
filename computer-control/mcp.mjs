@@ -192,7 +192,8 @@ if (flag("--cloud") >= 0 || managing) {
     execFile(process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open", [href], () => undefined);
   };
 
-  const client = `${address}/oauth/client.json`;
+  // An edition signs in under its own name where the relay has one for it.
+  const client = `${address}${typeof edition.client === "string" && /^\/oauth\/clients\/[a-z0-9-]{1,24}\.json$/.test(edition.client) ? edition.client : "/oauth/client.json"}`;
   // Connecting this computer and managing the list are two sign-ins, each asked for by name and kept apart.
   const kept = managing ? "refresh-manage" : "refresh";
   const asks = managing ? "control:manage offline_access" : "control:host offline_access";
