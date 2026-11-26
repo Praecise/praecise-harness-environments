@@ -128,12 +128,50 @@ whose role and name are known can.
 | 3. macOS helper | Written. Tried against TextEdit behind another app: reading, filling, pressing, typing, single keys, a picture and a zoom work and nothing comes to the front. A Command chord and an Edit-menu command do nothing in an app that is not in front | Not signed. Work that needs such commands wants a second user session |
 | 4. Linux helper | Written. Tried through the whole environment against a GTK app in a session of its own: reading, modes, filling, pressing, stale references, a picture, pointer, typing and chords | Wayland has no picture or pointer yet (portals); pointer on X11 only with `--own-session` |
 | 5. Windows helper | Written. 28 checks against a Windows Forms app in the signed-in session: reading, filling, pressing, stale references, a picture behind other windows, posted clicks and typing | Chords are refused; must run in the signed-in session; Store apps in a shared frame are not listed |
-| 6. Browser extension | Not started | Per-site permission from the start |
+| 6. Browser extension | Written for Chrome and other Chromium browsers as Praecise Control: one offered tab on one site, a short list of commands, cut off when it leaves the site or is stopped. Tried in a real Chromium | Loaded unpacked; not in a store. Safari and Firefox have no debugger to rest on and need another design |
 | 7. Measure | Not started | OSWorld 2.0, Windows Agent Arena, MacAgentBench for work; RedTeamCUA and OS-Harm for safety; same model with and without the element channel. A skip is not a pass |
 
 Not built from the list above: refusing coordinate input after a window's layout
 changes. A window that changes size is treated as a new screen, which covers resizing
 and nothing else.
+
+## Praecise Control, as a product (owner, 26 Nov 2026)
+
+What was decided: the helpers and extensions ship as one product named Praecise
+Control. On each system it is an app a person can see, in the menu bar or the taskbar,
+that says what an agent is using and stops it. There is an extension of our own for
+Chrome, Safari and Firefox. Each follows the rules of the place it is distributed. It
+keeps nothing that grows without bound. An agent can do what a person can: press,
+fill, type, drag, scroll.
+
+What the helpers and the extension already do toward that: every action above is
+there; nothing is written to disk by any of them, so there is no cache; an agent sees
+only the apps named and the one tab offered.
+
+What the research says about distribution, and how sure it is:
+
+| Where | Finding | Source |
+|---|---|---|
+| Mac App Store | A sandboxed app cannot rely on controlling other apps through the Accessibility API. Apple's own engineers point such apps to Developer ID signing and notarization outside the store | Apple Developer Forums replies; the guideline text itself was not read |
+| Chrome Web Store | The narrowest permissions that do the job, each one justified; powerful permissions and new developers are reviewed longer. Policy changes on data collection are enforced from 1 Aug 2026 | Chrome's program policies and its 2026 policy post; nothing found that names the debugger permission |
+| Firefox | No debugger API for extensions. Firefox has dropped the DevTools protocol for WebDriver BiDi | Third-party write-ups; Mozilla's own pages not read |
+| Safari | An extension ships inside a Mac app. No debugger API | Not confirmed from Apple's pages in this pass |
+| Microsoft Store | Desktop apps are packaged as MSIX and signed by the store. Nothing found on driving other apps' windows | Microsoft Learn; the policy text was not read for this |
+
+What follows, not yet built:
+
+1. The Mac app: a menu bar app, Developer ID signed and notarized, outside the Mac App
+   Store, that holds the two permissions under its own name and carries the helper.
+2. The Windows app: a tray app in the signed-in session, which is also what removes
+   the need to start the helper there by hand.
+3. The Linux app: a tray item where the desktop has one.
+4. Safari and Firefox extensions on a different footing from Chrome's: reading the page
+   from a content script and acting through it, which is weaker than the browser's own
+   input and has to be measured before it is offered.
+5. Store listings, each with the permission justifications and a privacy statement.
+
+Before any of these is submitted, read the store's current policy text itself. The
+table above is not enough to submit on.
 
 ## Not confirmed
 
