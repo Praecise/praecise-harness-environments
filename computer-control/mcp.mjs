@@ -146,12 +146,18 @@ if (flag("--cloud") >= 0) {
         })();
   const note = (text) => process.stderr.write(`praecise-control: ${text}\n`);
 
-  const about = await (await fetch(`${address}/.well-known/oauth-protected-resource`)).json();
-  const issuer = String(about.authorization_servers?.[0] ?? "").replace(/\/+$/, "");
-  const account = await (await fetch(`${issuer}/.well-known/openid-configuration`)).json();
   const client = `${address}/oauth/client.json`;
+  /** Where the person signs in, asked of the relay and then of the account service it names, when it is first needed. */
+  let known;
+  const accountService = () =>
+    (known ??= (async () => {
+      const about = await (await fetch(`${address}/.well-known/oauth-protected-resource`)).json();
+      const issuer = String(about.authorization_servers?.[0] ?? "").replace(/\/+$/, "");
+      return (await fetch(`${issuer}/.well-known/openid-configuration`)).json();
+    })());
 
   const exchange = async (form) => {
+    const account = await accountService();
     const response = await fetch(account.token_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: client, resource: address, ...form }) });
     const answer = await response.json();
     if (!response.ok) throw new Error(answer.error_description ?? answer.error ?? `the account service answered ${response.status}`);
@@ -161,8 +167,9 @@ if (flag("--cloud") >= 0) {
   };
 
   /** The person signs in, in their own browser, and is brought back to this computer. */
-  const signIn = () =>
-    new Promise((done, failed) => {
+  const signIn = async () => {
+    const account = await accountService();
+    return new Promise((done, failed) => {
       const verifier = randomBytes(32).toString("base64url");
       const state = randomBytes(16).toString("base64url");
       const back = createServer((request, response) => {
@@ -181,6 +188,7 @@ if (flag("--cloud") >= 0) {
         execFile(opener, [page.href], () => undefined);
       });
     });
+  };
 
   let held;
   /** A token of the person's own for this computer, renewed when it is close to running out. */
