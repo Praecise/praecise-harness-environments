@@ -315,6 +315,7 @@ func screenshot(_ params: [String: Any]) throws -> Any {
   guard CGPreflightScreenCaptureAccess() else { return try fail("Screen Recording is not allowed for this program; allow it in System Settings, Privacy & Security, Screen & System Audio Recording") }
   let width = Int(target.frame.width.rounded())
   let height = Int(target.frame.height.rounded())
+  capturingUntil = max(capturingUntil, Date().addingTimeInterval(3))
   let image: CGImage = try wait {
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     let mine = content.windows.filter { $0.owningApplication?.processID == target.pid && $0.windowLayer == 0 }
@@ -484,11 +485,13 @@ func recordStart(_ params: [String: Any]) throws -> Any {
   let recorder = try Recorder(app: target.id, url: RECORDINGS.appendingPathComponent(name + ".mp4"), window: window, width: width, height: height, rate: rate, audio: params["audio"] as? Bool == true, limit: limit)
   try recorder.start()
   recording[name] = recorder
+  capturingUntil = max(capturingUntil, Date().addingTimeInterval(Double(limit)))
   // It ends by itself at the length it was started with, and what it wrote is kept.
   work.asyncAfter(deadline: .now() + .seconds(limit)) {
     if let still = recording[name], still === recorder {
       recording[name] = nil
       _ = try? still.stop()
+      if recording.isEmpty { capturingUntil = Date() }
     }
   }
   return ["recording": name, "seconds": limit, "width": width, "height": height] as [String: Any]
@@ -505,6 +508,7 @@ func recordStop(_ params: [String: Any]) throws -> Any {
     return try fail("\(name.isEmpty ? "that" : name) is not a recording that is running")
   }
   let seconds = try recorder.stop()
+  if recording.isEmpty { capturingUntil = Date() }
   let size = ((try? FileManager.default.attributesOfItem(atPath: recorder.url.path))?[.size] as? NSNumber)?.intValue ?? 0
   return ["recording": name, "path": recorder.url.path, "mime": "video/mp4", "bytes": size, "seconds": (seconds * 10).rounded() / 10] as [String: Any]
 }
@@ -815,6 +819,8 @@ func answer(_ method: String, _ params: [String: Any]) throws -> Any {
 
 /// Set from the menu. While it is, nothing but `hello` is answered.
 nonisolated(unsafe) var paused = false
+/// Until when a window is being recorded or was just pictured. The menu bar shows it for that long.
+nonisolated(unsafe) var capturingUntil = Date.distantPast
 /// The app an agent last asked about, and when, for the menu.
 nonisolated(unsafe) var lastApp = ""
 nonisolated(unsafe) var lastAsked = Date.distantPast
@@ -984,6 +990,7 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.delegate = self
     item.menu = menu
     picture()
+    Timer.scheduledTimer(timeInterval: 1, target: self, selector: #selector(sign), userInfo: nil, repeats: true)
   }
 
   /// The Praecise mark in one colour, which the menu bar tints for itself: a square, its left half open.
@@ -997,10 +1004,20 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return true
     }
     image.isTemplate = true
-    image.accessibilityDescription = paused ? "Praecise Control, paused" : "Praecise Control"
+    image.accessibilityDescription = paused ? "Praecise Control, paused" : capturing ? "Praecise Control, capturing a window" : "Praecise Control"
     item.button?.image = image
+    // Red while a window is being recorded or pictured, so it is never done unseen.
+    item.button?.contentTintColor = capturing ? .systemRed : nil
+    item.button?.toolTip = capturing ? "Praecise Control is capturing a window" : "Praecise Control"
     // Dimmed while it is paused.
     item.button?.appearsDisabled = paused
+  }
+
+  var capturing = false
+
+  @objc func sign() {
+    let now = Date() < capturingUntil
+    if now != capturing { capturing = now; picture() }
   }
 
   func add(_ title: String, _ action: Selector?, to menu: NSMenu, symbol: String? = nil) {
@@ -1023,6 +1040,7 @@ final class Menu: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // Who is connected.
     menu.addItem(.sectionHeader(title: "Agents"))
+    if capturing { add("Capturing a window now", nil, to: menu, symbol: "record.circle") }
     add(paused ? "Paused: agents are refused" : joined.isEmpty ? "No agent is connected" : joined.count == 1 ? "1 agent is connected" : "\(joined.count) agents are connected", nil, to: menu)
     for each in joined {
       add("    \(each.app.isEmpty ? "has not used an app yet" : "using \(each.app), \(ago(each.last))"), connected \(ago(each.since))", nil, to: menu)
