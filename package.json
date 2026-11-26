@@ -8,7 +8,8 @@
     "./apple-development": "./apple-development/index.ts",
     "./apple": "./apple-development/index.ts",
     "./meta-marketing": "./meta-marketing/index.ts",
-    "./computer-control": "./computer-control/index.ts"
+    "./computer-control": "./computer-control/index.ts",
+    "./computer-control/browser": "./computer-control/browser.ts"
   },
   "files": ["apple-development", "meta-marketing", "computer-control", "README.md", "LICENSE"],
   "peerDependencies": {

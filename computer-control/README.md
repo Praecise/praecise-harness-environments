@@ -142,6 +142,41 @@ an app from the Store that is shown inside another process's frame is not.
 Tried against a Windows Forms app in the signed-in session with
 `tests/fixtures/windows-check.ps1`: 28 checks.
 
+## The browser a person is signed in to
+
+[browser/extension](browser/extension/) is the Praecise Control extension for Chrome and
+other Chromium browsers. A person opens it, sees the web pages they have open, and
+presses "Use this tab" beside one. The browser shows its own bar saying the tab is being
+debugged for as long as that lasts.
+
+```ts
+import { elements } from "@praecise/harness";
+import { signedInBrowser } from "@praecise/harness-environments/computer-control/browser";
+
+const screen = await signedInBrowser();   // waits for a tab to be offered
+export default elements(screen);
+```
+
+What holds it:
+
+- **One tab, one site.** The offer is for the site the tab is on. The agent cannot take
+  it to another site, and it is cut off if the tab goes to one, is closed, or the
+  person presses Stop.
+- **A short list of commands.** A picture, the page as a screen reader is told of it,
+  the pointer, keys, and an address on the same site. The extension refuses anything
+  else: nothing is evaluated in the page, and nothing is asked about cookies, storage
+  or the network.
+- **This machine only.** The extension connects to 127.0.0.1, and the listening side
+  accepts only this extension.
+
+Tried in a real Chromium with `tests/browser-real.test.ts`: offered from the
+extension's own popup, read, filled, pressed, pictured, refused another site, and cut
+off when stopped. Each step took well under a second.
+
+It is loaded unpacked for now (chrome://extensions, Developer mode, Load unpacked). It
+is not in the Chrome Web Store, and there is no Safari or Firefox extension yet;
+neither of those browsers has the debugger this one rests on.
+
 ## What is not done
 
 - **No helper is signed or packaged.** Each is built from its one file where it is used.
@@ -152,7 +187,5 @@ Tried against a Windows Forms app in the signed-in session with
   environment's test starts the helper and a helper started over SSH sees no window.
 - **It needs a harness later than 1.2.1**, for `elements()` and for an action whose
   kind depends on the call. Both are on the harness's main branch and not on npm.
-- **The person's signed-in browser.** A page in the browser the harness starts is read
-  the same way today, through `elements(browserScreen(...))`. The browser a person is
-  signed in to needs an extension, which is not written.
+- **Safari and Firefox extensions, and the extension in a store.**
 - **It has not been measured.** The benchmarks to run are listed in FRONTIER.md.

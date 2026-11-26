@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Praecise Control",
+  "version": "0.1.0",
+  "description": "Lets an agent on this machine work one tab you offer it, on the site it is on, until you stop it.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxo7GpXjDOnVpuDHp0z8NEUxSiUrwmhmN5Mcli6101fO1m4uFG2i9x7BI5qzS/CVW+eawTj8YtPTOWl8osBFdAUNQLraFwGH6aUVNogOXicH9YGIpa69Lwj72g1SGwzdwFj1YUJJaJzSsXnLLUA7oMGS4/BG77cmkHqfDfsiXQBvUh7YC3WWQaQFMpP4IkK/G9d1TyDZkj/Gq1U4xYBzuqyUG9NN7TYyRxUHpbULQ2up8z2TNfEXPKXu8WJI7ObG0cnp/YxRjx/H035x1TsML5Nvj2I2EKxM0iUtoP7I/qp0UKPEWv2hSG1wbEonHaXMejK8370Prlh5MwR2xLsykeQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["debugger", "tabs"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Praecise Control", "default_popup": "popup.html" }
+}
