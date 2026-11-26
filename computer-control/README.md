@@ -464,9 +464,8 @@ record. It does not keep what was read, typed or pictured.
 
 ## What is not done
 
-- **The Mac app is signed and not notarized.** Notarizing needs a credential stored on
-  the Mac that builds it. The Windows app is not signed and has no icon of its own.
-  Nothing has an installer.
+- **The Windows app is not signed.** Nothing has an installer. The Mac apps are signed
+  and notarized.
 - **No menu was seen or pressed.** What each menu item does was tried through what a
   helper answers; the menus themselves, and the Linux icon, were not looked at.
 - **Wayland** has elements, pressing and filling, and no picture or pointer.
