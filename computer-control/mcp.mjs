@@ -3,6 +3,9 @@
 //
 //   node mcp.mjs [folder]                  speak MCP on this program's input and output
 //   node mcp.mjs [folder] --http [port]    speak MCP over HTTP on this machine only (17346 unless said)
+//   node mcp.mjs [folder] --cloud [address]
+//                                          connect this computer to Praecise Control's public route, for an
+//                                          assistant that calls from somewhere else (https://control.praecise.com unless said)
 //   node mcp.mjs [folder] --tools openai   print the tools as OpenAI function definitions
 //   node mcp.mjs [folder] --call <tool> '<arguments as JSON>'
 //                                          make one call and print what came back
@@ -23,22 +26,30 @@
 // Chat Completions and Responses APIs do, a Tenzro node's among them: `--tools openai`
 // gives it the definitions and `--call` carries out what its model asks for.
 //
+// For one that calls from somewhere else, as ChatGPT does, nothing is opened on this
+// computer. `--cloud` signs the person in with their Praecise account and connects out
+// to the relay, which passes that assistant's requests here and the answers back. The
+// person chooses, on the account's own consent page, which computer an assistant may
+// reach. Stopping this program ends it.
+//
 // The app decides everything, as it does for any other caller. Nothing is decided here.
 // On input and output, the output carries nothing but protocol messages.
 
-import { randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { hostname } from "node:os";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { App, PROTOCOL_VERSION, handleMcp } from "@praecise/harness";
+import { App, PROTOCOL_VERSION, fileVault, handleMcp, keychainVault, secretCipher } from "@praecise/harness";
 
 const VERSION = "io.modelcontextprotocol/protocolVersion";
 const args = process.argv.slice(2);
 const flag = (name) => args.indexOf(name);
-const given = args.find((each, at) => !each.startsWith("--") && !["--http", "--tools", "--call"].includes(args[at - 1]) && !(args[at - 2] === "--call"));
+const given = args.find((each, at) => !each.startsWith("--") && !["--http", "--tools", "--call", "--cloud"].includes(args[at - 1]) && !(args[at - 2] === "--call"));
 const root = resolve(given ?? resolve(dirname(fileURLToPath(import.meta.url)), "app"));
 
 const app = await App.load({ root });
@@ -116,7 +127,110 @@ if (flag("--call") >= 0) {
   process.exit(result.isError ? 1 : 0);
 }
 
-if (flag("--http") >= 0) {
+if (flag("--cloud") >= 0) {
+  const said = args[flag("--cloud") + 1];
+  const address = (said && /^https?:\/\//.test(said) ? said : "https://control.praecise.com").replace(/\/+$/, "");
+  const state = join(root, ".praecise");
+  mkdirSync(state, { recursive: true });
+  // This computer's own name for itself at the relay, made once.
+  const named = join(state, "control-machine");
+  if (!existsSync(named)) writeFileSync(named, randomBytes(18).toString("base64url"), { mode: 0o600 });
+  const machine = readFileSync(named, "utf8").trim();
+  // Where the sign-in is kept: the keychain on a Mac, or a sealed file under PRAECISE_VAULT_KEY anywhere else.
+  const vault = process.env.PRAECISE_VAULT_KEY
+    ? fileVault(state, secretCipher(process.env.PRAECISE_VAULT_KEY))
+    : process.platform === "darwin"
+      ? keychainVault("praecise.computer-control-cloud")
+      : (() => {
+          throw new Error("there is nowhere safe to keep the sign-in: set PRAECISE_VAULT_KEY");
+        })();
+  const note = (text) => process.stderr.write(`praecise-control: ${text}\n`);
+
+  const about = await (await fetch(`${address}/.well-known/oauth-protected-resource`)).json();
+  const issuer = String(about.authorization_servers?.[0] ?? "").replace(/\/+$/, "");
+  const account = await (await fetch(`${issuer}/.well-known/openid-configuration`)).json();
+  const client = `${address}/oauth/client.json`;
+
+  const exchange = async (form) => {
+    const response = await fetch(account.token_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: client, resource: address, ...form }) });
+    const answer = await response.json();
+    if (!response.ok) throw new Error(answer.error_description ?? answer.error ?? `the account service answered ${response.status}`);
+    // A sign-in is renewed with something that is replaced each time it is used.
+    if (answer.refresh_token) await vault.put("refresh", answer.refresh_token);
+    return { token: answer.access_token, until: Date.now() + (answer.expires_in ?? 600) * 1000 };
+  };
+
+  /** The person signs in, in their own browser, and is brought back to this computer. */
+  const signIn = () =>
+    new Promise((done, failed) => {
+      const verifier = randomBytes(32).toString("base64url");
+      const state = randomBytes(16).toString("base64url");
+      const back = createServer((request, response) => {
+        const url = new URL(request.url ?? "/", "http://127.0.0.1");
+        if (url.pathname !== "/callback") return response.writeHead(404).end();
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(url.searchParams.get("code") ? "This computer is connected to Praecise Control. You can close this page." : "Praecise Control was not connected.");
+        back.close();
+        if (url.searchParams.get("state") !== state || !url.searchParams.get("code")) return failed(new Error(url.searchParams.get("error_description") ?? "the sign-in was not finished"));
+        exchange({ grant_type: "authorization_code", code: url.searchParams.get("code"), code_verifier: verifier, redirect_uri: `http://127.0.0.1:${back.address().port}/callback` }).then(done, failed);
+      });
+      back.listen(0, "127.0.0.1", () => {
+        const page = new URL(account.authorization_endpoint);
+        for (const [key, value] of Object.entries({ response_type: "code", client_id: client, redirect_uri: `http://127.0.0.1:${back.address().port}/callback`, scope: "control:host offline_access", resource: address, state, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) page.searchParams.set(key, value);
+        note(`sign in to connect this computer: ${page.href}`);
+        const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+        execFile(opener, [page.href], () => undefined);
+      });
+    });
+
+  let held;
+  /** A token of the person's own for this computer, renewed when it is close to running out. */
+  const token = async () => {
+    // A token placed here by whoever runs this unattended is used as it is.
+    if (process.env.PRAECISE_CONTROL_CLOUD_TOKEN) return process.env.PRAECISE_CONTROL_CLOUD_TOKEN;
+    if (held && held.until - Date.now() > 60_000) return held.token;
+    const refresh = await vault.get("refresh");
+    try {
+      held = refresh ? await exchange({ grant_type: "refresh_token", refresh_token: refresh }) : await signIn();
+    } catch (err) {
+      if (!refresh) throw err;
+      note(`the sign-in kept here is no longer good (${err.message}); signing in again`);
+      await vault.delete("refresh");
+      held = await signIn();
+    }
+    return held.token;
+  };
+
+  let wait = 1000;
+  const connect = async () => {
+    let socket;
+    try {
+      socket = new WebSocket(`${address.replace(/^http/, "ws")}/host`);
+      const mine = await token();
+      socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "hello", token: mine, machine, name: hostname() })));
+    } catch (err) {
+      note(`could not connect: ${err.message}`);
+      return setTimeout(connect, (wait = Math.min(wait * 2, 60_000)));
+    }
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.type === "welcome") {
+        wait = 1000;
+        return note(`this computer is reachable through ${address}/mcp by assistants its person allows`);
+      }
+      if (message.type === "refused") return note(`the relay refused this computer: ${message.reason}`);
+      if (typeof message.id !== "number") return;
+      inTurn(async () => {
+        const asked = message.message;
+        const reply = Array.isArray(asked) ? (await Promise.all(asked.map(answer))).filter((each) => each !== undefined) : await answer(asked);
+        socket.send(JSON.stringify({ id: message.id, reply: Array.isArray(reply) && !reply.length ? undefined : reply }));
+      });
+    });
+    // Tried again by itself, a little later each time, for as long as this program runs.
+    socket.addEventListener("close", () => setTimeout(connect, (wait = Math.min(wait * 2, 60_000))));
+    socket.addEventListener("error", () => undefined);
+  };
+  await connect();
+} else if (flag("--http") >= 0) {
   const port = Number(args[flag("--http") + 1]) > 0 ? Number(args[flag("--http") + 1]) : 17346;
   // Kept beside the app's own state, for this person's programs to read and no one else's.
   const kept = join(root, ".praecise", "control-http.token");
