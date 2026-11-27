@@ -636,7 +636,11 @@ const server = createServer((request, response) => {
       if (reply === undefined) return say(202);
       return say(200, reply);
     } catch (err) {
-      if (!(err instanceof Refused)) return say(500, { error: "something went wrong here" });
+      if (!(err instanceof Refused)) {
+        // Written down, so that a fault here can be found: where it happened, never what was sent.
+        process.stderr.write(`praecise-control-relay: ${request.method} /${path.split("/")[1] ?? ""} failed: ${err?.stack ?? err}\n`);
+        return say(500, { error: "something went wrong here" });
+      }
       say(err.status, { error: err.message }, err.status === 401 ? { "www-authenticate": `Bearer resource_metadata="${metadata}"` } : {});
     }
   });
