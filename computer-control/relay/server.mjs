@@ -548,10 +548,10 @@ const server = createServer((request, response) => {
     return say(200, { resource: ADDRESS, authorization_servers: [ISSUER], scopes_supported: [...USES, ...LISTS], bearer_methods_supported: ["header"], dpop_signing_alg_values_supported: ["ES256", "EdDSA"], resource_name: "Praecise Control" });
   }
   // The same, for an edition that carries another name: the person is asked by that name.
-  const [, named] = /^\/oauth\/clients\/([a-z0-9-]{1,24})\.json$/.exec(path) ?? [];
-  if (request.method === "GET" && named) {
-    if (typeof EDITION_CLIENTS[named] !== "string") return say(404, { error: "there is no such edition" });
-    return say(200, { client_id: `${ADDRESS}${path}`, client_name: EDITION_CLIENTS[named].slice(0, 80), redirect_uris: ["http://127.0.0.1/callback"], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" });
+  const [, edition] = /^\/oauth\/clients\/([a-z0-9-]{1,24})\.json$/.exec(path) ?? [];
+  if (request.method === "GET" && edition) {
+    if (typeof EDITION_CLIENTS[edition] !== "string") return say(404, { error: "there is no such edition" });
+    return say(200, { client_id: `${ADDRESS}${path}`, client_name: EDITION_CLIENTS[edition].slice(0, 80), redirect_uris: ["http://127.0.0.1/callback"], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" });
   }
   // How the program on a person's computer says what it is to the account service.
   if (request.method === "GET" && path === "/oauth/client.json") {
